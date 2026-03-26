@@ -28,6 +28,8 @@ class CallService {
   private iceServers: RealtimeIceServer[] | null = null;
   private activeToken: string | null = null;
   private teardownTimer: ReturnType<typeof setTimeout> | null = null;
+  private peerCallId: string | null = null;
+  private pendingRemoteCandidates: NonNullable<CallSignalEnvelope['candidate']>[] = [];
 
   start(token: string) {
     if (this.socket && this.activeToken === token) {
@@ -138,6 +140,8 @@ class CallService {
 
     InCallManager.stopRingtone();
     callStore.patch({ phase: 'ending' });
+    this.teardownRtc();
+    this.stopAudioModes();
     this.socket?.emit('calls:reject', {
       callId: current.session.id,
     });
@@ -150,6 +154,8 @@ class CallService {
     }
 
     callStore.patch({ phase: 'ending' });
+    this.teardownRtc();
+    this.stopAudioModes();
     this.socket?.emit('calls:end', {
       callId: current.session.id,
       reason,
@@ -210,18 +216,25 @@ class CallService {
 
   private async handleSignal(callId: string, signal: CallSignalEnvelope) {
     const current = callStore.getState();
-    if (!current.session || current.session.id !== callId) {
+    if (
+      !current.session ||
+      current.session.id !== callId ||
+      current.phase === 'ending' ||
+      current.phase === 'ended' ||
+      current.phase === 'error'
+    ) {
       return;
     }
 
-    const peer = await this.ensurePeer(callId);
     if (signal.type === 'offer' && signal.sdp) {
+      const peer = await this.ensurePeer(callId);
       await peer.setRemoteDescription(
         new RTCSessionDescription({
           type: 'offer',
           sdp: signal.sdp,
         }),
       );
+      await this.flushPendingRemoteCandidates(peer);
 
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
@@ -236,19 +249,22 @@ class CallService {
     }
 
     if (signal.type === 'ice-candidate' && signal.candidate) {
-      await peer.addIceCandidate(
-        new RTCIceCandidate({
-          candidate: signal.candidate.candidate,
-          sdpMid: signal.candidate.sdpMid ?? null,
-          sdpMLineIndex: signal.candidate.sdpMLineIndex ?? null,
-        }),
-      );
+      if (!this.peer || this.peerCallId !== callId) {
+        this.pendingRemoteCandidates.push(signal.candidate);
+        return;
+      }
+
+      await this.addRemoteIceCandidate(this.peer, signal.candidate);
     }
   }
 
   private async ensurePeer(callId: string) {
-    if (this.peer) {
+    if (this.peer && this.peerCallId === callId) {
       return this.peer;
+    }
+
+    if (this.peer && this.peerCallId !== callId) {
+      this.teardownRtc();
     }
 
     const peer = new RTCPeerConnection({
@@ -294,6 +310,7 @@ class CallService {
     };
 
     this.peer = peer;
+    this.peerCallId = callId;
     return peer;
   }
 
@@ -365,9 +382,53 @@ class CallService {
   private teardownRtc() {
     this.peer?.close();
     this.peer = null;
+    this.peerCallId = null;
+    this.pendingRemoteCandidates = [];
 
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = null;
+  }
+
+  private async addRemoteIceCandidate(
+    peer: RTCPeerConnection,
+    candidate: NonNullable<CallSignalEnvelope['candidate']>,
+  ) {
+    if ((peer as any).signalingState === 'closed' || (peer as any).connectionState === 'closed') {
+      return;
+    }
+
+    if (!peer.remoteDescription) {
+      this.pendingRemoteCandidates.push(candidate);
+      return;
+    }
+
+    try {
+      await peer.addIceCandidate(
+        new RTCIceCandidate({
+          candidate: candidate.candidate,
+          sdpMid: candidate.sdpMid ?? null,
+          sdpMLineIndex: candidate.sdpMLineIndex ?? null,
+        }),
+      );
+    } catch (error) {
+      const current = callStore.getState();
+      if (current.phase === 'ending' || current.phase === 'ended' || current.phase === 'error') {
+        return;
+      }
+      console.warn('Ignoring stale ICE candidate', error);
+    }
+  }
+
+  private async flushPendingRemoteCandidates(peer: RTCPeerConnection) {
+    if (!peer.remoteDescription || this.pendingRemoteCandidates.length === 0) {
+      return;
+    }
+
+    const candidates = [...this.pendingRemoteCandidates];
+    this.pendingRemoteCandidates = [];
+    for (const candidate of candidates) {
+      await this.addRemoteIceCandidate(peer, candidate);
+    }
   }
 
   private async ensureModal() {
