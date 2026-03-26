@@ -30,20 +30,33 @@ interface Props extends NavigationComponentProps {
   areaName?: string;
 }
 
-const TIME_SLOTS = [
-  { label: 'Mañana', start: '09:00', end: '13:00' },
-  { label: 'Tarde', start: '14:00', end: '18:00' },
-  { label: 'Noche', start: '19:00', end: '23:00' },
-] as const;
-
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function parseDateParts(iso: string): { day: number; month: number; year: number } {
+  const [y, m, d] = iso.split('-').map(Number);
+  return { day: d, month: m, year: y };
+}
+
+function buildIso(day: number, month: number, year: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function daysInMonth(month: number, year: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
 export function CreateReservationScreen({ componentId, areaId, areaName }: Props) {
-  const [date, setDate] = useState(todayIso());
+  const initial = parseDateParts(todayIso());
+  const [day, setDay] = useState(initial.day);
+  const [month, setMonth] = useState(initial.month);
+  const [year, setYear] = useState(initial.year);
+  const [startHour, setStartHour] = useState(9);
+  const [startMin, setStartMin] = useState(0);
+  const [endHour, setEndHour] = useState(18);
+  const [endMin, setEndMin] = useState(0);
   const [attendees, setAttendees] = useState(4);
-  const [slotIdx, setSlotIdx] = useState(0);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [statuses, setStatuses] = useState<ReservationStatus[]>([]);
@@ -71,6 +84,14 @@ export function CreateReservationScreen({ componentId, areaId, areaName }: Props
       return;
     }
 
+    const startTime = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+    const endTime = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+
+    if (startTime >= endTime) {
+      Alert.alert('Horario inválido', 'La hora de inicio debe ser anterior a la hora de fin.');
+      return;
+    }
+
     const pendingStatus = statuses.find(
       (s) => s.code === 'pending' || s.code === 'pendiente',
     ) ?? statuses[0];
@@ -80,16 +101,14 @@ export function CreateReservationScreen({ componentId, areaId, areaName }: Props
       return;
     }
 
-    const slot = TIME_SLOTS[slotIdx];
-
     setLoading(true);
     try {
       await createReservation({
         residentId: user.id,
         areaId,
-        reservationDate: date,
-        startTime: slot.start,
-        endTime: slot.end,
+        reservationDate: buildIso(day, month, year),
+        startTime,
+        endTime,
         statusId: pendingStatus.id,
         notesByResident: notes.trim() || undefined,
       });
@@ -117,17 +136,8 @@ export function CreateReservationScreen({ componentId, areaId, areaName }: Props
         <View style={styles.divider} />
 
         <View style={styles.section}>
-          <Eyebrow>01. Fecha (YYYY-MM-DD)</Eyebrow>
-          <View style={styles.inputCard}>
-            <TextInput
-              style={styles.dateInput}
-              value={date}
-              onChangeText={setDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={noirTheme.surfaceHighest}
-              maxLength={10}
-            />
-          </View>
+          <Eyebrow>01. Fecha</Eyebrow>
+          <DatePicker day={day} month={month} year={year} onDayChange={setDay} onMonthChange={setMonth} onYearChange={setYear} />
         </View>
 
         <View style={styles.section}>
@@ -141,23 +151,12 @@ export function CreateReservationScreen({ componentId, areaId, areaName }: Props
 
         <View style={styles.section}>
           <Eyebrow>03. Horario</Eyebrow>
-          <View style={styles.slotGrid}>
-            {TIME_SLOTS.map((slot, idx) => {
-              const isSelected = slotIdx === idx;
-              return (
-                <Pressable
-                  key={slot.label}
-                  onPress={() => setSlotIdx(idx)}
-                  style={[styles.slotCard, isSelected && styles.slotSelected]}>
-                  <Text style={[styles.slotLabel, isSelected && styles.slotLabelSelected]}>
-                    {slot.label}
-                  </Text>
-                  <Text style={[styles.slotValue, isSelected && styles.slotValueSelected]}>
-                    {slot.start} – {slot.end}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          <View style={styles.timeRow}>
+            <TimePicker label="Desde" hour={startHour} minute={startMin} onHourChange={setStartHour} onMinuteChange={setStartMin} />
+            <View style={styles.timeSeparator}>
+              <Text style={styles.timeSeparatorText}>—</Text>
+            </View>
+            <TimePicker label="Hasta" hour={endHour} minute={endMin} onHourChange={setEndHour} onMinuteChange={setEndMin} />
           </View>
         </View>
 
@@ -203,6 +202,122 @@ function CounterButton({ label, onPress }: { label: 'add' | 'remove'; onPress: (
   );
 }
 
+const MINUTE_STEPS = [0, 15, 30, 45];
+
+function TimePicker({
+  label,
+  hour,
+  minute,
+  onHourChange,
+  onMinuteChange,
+}: {
+  label: string;
+  hour: number;
+  minute: number;
+  onHourChange: (h: number) => void;
+  onMinuteChange: (m: number) => void;
+}) {
+  function stepHour(delta: number) {
+    onHourChange((hour + delta + 24) % 24);
+  }
+  function stepMinute(delta: number) {
+    const idx = MINUTE_STEPS.indexOf(minute);
+    const next = (idx + delta + MINUTE_STEPS.length) % MINUTE_STEPS.length;
+    onMinuteChange(MINUTE_STEPS[next]);
+  }
+
+  return (
+    <View style={styles.timeField}>
+      <Text style={styles.timeLabel}>{label}</Text>
+      <View style={styles.timePickerCard}>
+        <View style={styles.timeUnit}>
+          <Pressable onPress={() => stepHour(1)} style={styles.timeStepBtn}>
+            <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-up" size={22} />
+          </Pressable>
+          <Text style={styles.timeDigit}>{String(hour).padStart(2, '0')}</Text>
+          <Pressable onPress={() => stepHour(-1)} style={styles.timeStepBtn}>
+            <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-down" size={22} />
+          </Pressable>
+        </View>
+        <Text style={styles.timeColon}>:</Text>
+        <View style={styles.timeUnit}>
+          <Pressable onPress={() => stepMinute(1)} style={styles.timeStepBtn}>
+            <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-up" size={22} />
+          </Pressable>
+          <Text style={styles.timeDigit}>{String(minute).padStart(2, '0')}</Text>
+          <Pressable onPress={() => stepMinute(-1)} style={styles.timeStepBtn}>
+            <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-down" size={22} />
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const MONTH_NAMES = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+
+function DatePicker({
+  day, month, year,
+  onDayChange, onMonthChange, onYearChange,
+}: {
+  day: number; month: number; year: number;
+  onDayChange: (d: number) => void;
+  onMonthChange: (m: number) => void;
+  onYearChange: (y: number) => void;
+}) {
+  function stepDay(delta: number) {
+    const max = daysInMonth(month, year);
+    onDayChange(((day - 1 + delta + max) % max) + 1);
+  }
+  function stepMonth(delta: number) {
+    const nm = ((month - 1 + delta + 12) % 12) + 1;
+    onMonthChange(nm);
+    const max = daysInMonth(nm, year);
+    if (day > max) onDayChange(max);
+  }
+  function stepYear(delta: number) {
+    const ny = year + delta;
+    onYearChange(ny);
+    const max = daysInMonth(month, ny);
+    if (day > max) onDayChange(max);
+  }
+
+  return (
+    <View style={styles.datePickerCard}>
+      <View style={styles.dateUnit}>
+        <Pressable onPress={() => stepDay(1)} style={styles.timeStepBtn}>
+          <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-up" size={22} />
+        </Pressable>
+        <Text style={styles.timeDigit}>{String(day).padStart(2, '0')}</Text>
+        <Pressable onPress={() => stepDay(-1)} style={styles.timeStepBtn}>
+          <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-down" size={22} />
+        </Pressable>
+        <Text style={styles.dateUnitLabel}>DÍA</Text>
+      </View>
+      <View style={styles.dateUnit}>
+        <Pressable onPress={() => stepMonth(1)} style={styles.timeStepBtn}>
+          <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-up" size={22} />
+        </Pressable>
+        <Text style={styles.timeDigit}>{MONTH_NAMES[month - 1]}</Text>
+        <Pressable onPress={() => stepMonth(-1)} style={styles.timeStepBtn}>
+          <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-down" size={22} />
+        </Pressable>
+        <Text style={styles.dateUnitLabel}>MES</Text>
+      </View>
+      <View style={[styles.dateUnit, styles.dateUnitYear]}>
+        <Pressable onPress={() => stepYear(1)} style={styles.timeStepBtn}>
+          <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-up" size={22} />
+        </Pressable>
+        <Text style={styles.timeDigit}>{year}</Text>
+        <Pressable onPress={() => stepYear(-1)} style={styles.timeStepBtn}>
+          <MaterialIcons color={noirTheme.primary} name="keyboard-arrow-down" size={22} />
+        </Pressable>
+        <Text style={styles.dateUnitLabel}>AÑO</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 24,
@@ -234,10 +349,28 @@ const styles = StyleSheet.create({
     backgroundColor: noirTheme.surfaceLow,
     padding: 20,
   },
-  dateInput: {
-    color: noirTheme.primary,
-    fontSize: 28,
-    fontWeight: '800',
+  datePickerCard: {
+    backgroundColor: noirTheme.surfaceLow,
+    flexDirection: 'row',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    gap: 0,
+  },
+  dateUnit: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  dateUnitYear: {
+    flex: 1.4,
+  },
+  dateUnitLabel: {
+    color: noirTheme.surfaceHighest,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginTop: 2,
   },
   counterCard: {
     backgroundColor: noirTheme.surfaceLow,
@@ -260,36 +393,61 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '800',
   },
-  slotGrid: {
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
   },
-  slotCard: {
-    backgroundColor: noirTheme.surfaceLow,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+  timeField: {
+    flex: 1,
     gap: 8,
   },
-  slotSelected: {
-    backgroundColor: noirTheme.primary,
-  },
-  slotLabel: {
+  timeLabel: {
     color: noirTheme.secondary,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
   },
-  slotLabelSelected: {
-    color: '#000000',
+  timePickerCard: {
+    backgroundColor: noirTheme.surfaceLow,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    gap: 4,
   },
-  slotValue: {
+  timeUnit: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  timeStepBtn: {
+    width: 40,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timeDigit: {
     color: noirTheme.primary,
-    fontSize: 22,
+    fontSize: 32,
     fontWeight: '800',
+    letterSpacing: -1,
+    lineHeight: 36,
   },
-  slotValueSelected: {
-    color: '#000000',
+  timeColon: {
+    color: noirTheme.primary,
+    fontSize: 28,
+    fontWeight: '800',
+    marginBottom: 2,
+    lineHeight: 36,
+  },
+  timeSeparator: {
+    paddingTop: 24,
+  },
+  timeSeparatorText: {
+    color: noirTheme.surfaceHighest,
+    fontSize: 22,
+    fontWeight: '300',
   },
   notesCard: {
     backgroundColor: noirTheme.surfaceLow,
