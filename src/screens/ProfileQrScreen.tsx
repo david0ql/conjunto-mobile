@@ -1,5 +1,5 @@
-import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Image, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {
   Eyebrow,
@@ -7,23 +7,55 @@ import {
   NoirTopBar,
   PrimaryButton,
 } from '../components/NoirUI';
-import { noirAssets } from '../design/assets';
 import { noirTheme } from '../design/theme';
 import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
-
-const actionCards = [
-  ['history', 'Access History', 'Last entry: 14:22 Today'],
-  ['group-add', 'Guest Access', '3 Active Invites'],
-] as const;
-
-const rows = [
-  ['business', 'Unit Residence', 'TORRE 04, LEVEL 12, SUITE C'],
-  ['verified-user', 'Security Tier', 'RESIDENT - FULL ACCESS'],
-  ['event-available', 'Contract End', 'OCT 2026'],
-] as const;
+import { authStore } from '../context/auth.store';
+import {
+  getMyProfile,
+  getMyApartments,
+  getMyQr,
+  type ResidentProfile,
+  type ResidentApartment,
+} from '../services/api';
 
 export function ProfileQrScreen() {
+  const [profile, setProfile] = useState<ResidentProfile | null>(null);
+  const [apartments, setApartments] = useState<ResidentApartment[]>([]);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [selectedAptIdx, setSelectedAptIdx] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([getMyProfile(), getMyApartments(), getMyQr()])
+      .then(([p, apts, qr]) => {
+        setProfile(p);
+        setApartments(apts);
+        setQrDataUrl(qr.dataUrl);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleLogout() {
+    await authStore.clearSession();
+    setShellRoot(COMPONENTS.login);
+  }
+
+  const selectedApt = apartments[selectedAptIdx];
+  const aptLabel = selectedApt
+    ? `${selectedApt.apartment?.towerData?.name ?? 'Torre'} · Apt. ${selectedApt.apartment?.number ?? '—'}`
+    : profile?.apartment
+      ? `${profile.apartment.towerData?.name ?? 'Torre'} · Apt. ${profile.apartment.number}`
+      : 'Sin apartamento';
+
+  const infoRows = [
+    ['business', 'Residencia', aptLabel],
+    ['verified-user', 'Tipo de acceso', 'RESIDENTE — ACCESO COMPLETO'],
+    ['email', 'Correo', profile?.email ?? '—'],
+    ['phone', 'Teléfono', profile?.phone ?? '—'],
+  ] as const;
+
   return (
     <NoirScreen>
       <NoirTopBar />
@@ -31,12 +63,48 @@ export function ProfileQrScreen() {
       <View style={styles.content}>
         <View style={styles.header}>
           <Eyebrow>Resident ID</Eyebrow>
-          <Text style={styles.name}>Alexander Vaughn</Text>
-          <Text style={styles.meta}>TORRE 04 - 12C</Text>
+          {loading ? (
+            <View style={styles.nameSkeleton} />
+          ) : (
+            <Text style={styles.name}>
+              {profile ? `${profile.name} ${profile.lastName}` : '—'}
+            </Text>
+          )}
+          <Text style={styles.meta}>{aptLabel}</Text>
         </View>
 
+        {/* Apartment selector for multi-apartment residents */}
+        {apartments.length > 1 ? (
+          <View style={styles.aptSelector}>
+            <Eyebrow>Seleccionar apartamento</Eyebrow>
+            <View style={styles.aptList}>
+              {apartments.map((apt, idx) => (
+                <Pressable
+                  key={apt.id}
+                  onPress={() => setSelectedAptIdx(idx)}
+                  style={[styles.aptPill, idx === selectedAptIdx && styles.aptPillActive]}>
+                  <Text style={[styles.aptPillText, idx === selectedAptIdx && styles.aptPillTextActive]}>
+                    {apt.apartment?.towerData?.code ?? '?'} · {apt.apartment?.number ?? '—'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* QR Code */}
         <View style={styles.qrFrame}>
-          <Image source={{ uri: noirAssets.profile.qr }} style={styles.qr} />
+          {loading ? (
+            <View style={styles.qrPlaceholder}>
+              <ActivityIndicator color={noirTheme.surfaceHighest} size="large" />
+            </View>
+          ) : qrDataUrl ? (
+            <Image source={{ uri: qrDataUrl }} style={styles.qr} />
+          ) : (
+            <View style={styles.qrPlaceholder}>
+              <MaterialIcons color={noirTheme.surfaceHighest} name="qr-code" size={80} />
+            </View>
+          )}
         </View>
 
         <View style={styles.statusPill}>
@@ -44,35 +112,8 @@ export function ProfileQrScreen() {
           <Text style={styles.statusText}>Active secure key</Text>
         </View>
 
-        <View style={styles.actionsGrid}>
-          {actionCards.map(item => (
-            <View key={item[1]} style={styles.actionCard}>
-              <MaterialIcons color={noirTheme.primary} name={item[0]} size={22} />
-              <View style={styles.actionCopy}>
-                <Text style={styles.actionTitle}>{item[1]}</Text>
-                <Text style={styles.actionBody}>{item[2]}</Text>
-              </View>
-            </View>
-          ))}
-
-          <Pressable
-            style={styles.serviceCard}
-            onPress={() => {
-              setShellRoot(COMPONENTS.porteriaLog);
-            }}>
-            <View style={styles.serviceRow}>
-              <MaterialIcons color={noirTheme.primary} name="room-service" size={20} />
-              <View style={styles.actionCopy}>
-                <Text style={styles.actionTitle}>Concierge Services</Text>
-                <Text style={styles.actionBody}>Valet, Housekeeping, Dining</Text>
-              </View>
-            </View>
-            <MaterialIcons color={noirTheme.secondary} name="chevron-right" size={18} />
-          </Pressable>
-        </View>
-
         <View style={styles.infoList}>
-          {rows.map(item => (
+          {infoRows.map((item) => (
             <View key={item[1]} style={styles.infoRow}>
               <View style={styles.infoLeft}>
                 <MaterialIcons color={noirTheme.secondary} name={item[0]} size={18} />
@@ -86,9 +127,7 @@ export function ProfileQrScreen() {
         <PrimaryButton
           label="Cerrar sesión"
           variant="ghost"
-          onPress={() => {
-            setShellRoot(COMPONENTS.login);
-          }}
+          onPress={handleLogout}
           style={styles.logoutButton}
         />
 
@@ -97,7 +136,6 @@ export function ProfileQrScreen() {
           <Text style={styles.footerMeta}>ENCRYPTED BIOMETRIC PROTOCOL v4.2.0</Text>
         </View>
       </View>
-
     </NoirScreen>
   );
 }
@@ -112,6 +150,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  nameSkeleton: {
+    width: 200,
+    height: 34,
+    backgroundColor: noirTheme.surfaceHigh,
+    borderRadius: 4,
+  },
   name: {
     color: noirTheme.primary,
     fontSize: 34,
@@ -125,6 +169,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  aptSelector: {
+    gap: 12,
+  },
+  aptList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  aptPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: noirTheme.surfaceLow,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  aptPillActive: {
+    backgroundColor: noirTheme.primary,
+    borderColor: noirTheme.primary,
+  },
+  aptPillText: {
+    color: noirTheme.secondary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  aptPillTextActive: {
+    color: '#000000',
+  },
   qrFrame: {
     alignSelf: 'center',
     backgroundColor: '#ffffff',
@@ -133,6 +206,13 @@ const styles = StyleSheet.create({
   qr: {
     width: 220,
     height: 220,
+  },
+  qrPlaceholder: {
+    width: 220,
+    height: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: noirTheme.surfaceHigh,
   },
   statusPill: {
     alignSelf: 'center',
@@ -156,46 +236,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
-  },
-  actionsGrid: {
-    gap: 12,
-  },
-  actionCard: {
-    backgroundColor: noirTheme.surfaceLow,
-    padding: 18,
-    minHeight: 112,
-    justifyContent: 'space-between',
-  },
-  actionCopy: {
-    gap: 6,
-  },
-  actionTitle: {
-    color: noirTheme.primary,
-    fontSize: 16,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  actionBody: {
-    color: noirTheme.secondary,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  serviceCard: {
-    backgroundColor: noirTheme.surfaceLow,
-    padding: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  logoutButton: {
-    minHeight: 52,
-  },
-  serviceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
   },
   infoList: {
     gap: 4,
@@ -221,6 +261,9 @@ const styles = StyleSheet.create({
   infoValue: {
     color: noirTheme.secondary,
     fontSize: 12,
+  },
+  logoutButton: {
+    minHeight: 52,
   },
   footer: {
     alignItems: 'center',

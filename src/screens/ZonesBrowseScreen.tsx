@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {
@@ -8,103 +8,61 @@ import {
   NoirScreen,
   NoirTopBar,
 } from '../components/NoirUI';
-import { noirAssets } from '../design/assets';
 import { pushScreen } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { NavigationComponentProps } from 'react-native-navigation';
 import { noirTheme } from '../design/theme';
+import {
+  getCommonAreas,
+  getMyReservations,
+  type CommonArea,
+  type Reservation,
+} from '../services/api';
 
-const reservableCards = [
-  {
-    image: noirAssets.zones.salon,
-    title: 'Salón social',
-    subtitle: 'Capacidad 50 pers',
-    detail: 'Disponible hoy · 2 slots libres',
-  },
-  {
-    image: noirAssets.zones.bbq,
-    title: 'Zona BBQ',
-    subtitle: 'Terraza norte',
-    detail: 'Disponible mañana · 4 slots libres',
-  },
-  {
-    image: noirAssets.zones.kiosko,
-    title: 'Kiosko',
-    subtitle: 'Zona zen',
-    detail: 'Disponible hoy · 1 slot libre',
-  },
-  {
-    image: noirAssets.zones.gym,
-    title: 'Gimnasio',
-    subtitle: 'Planta baja',
-    detail: 'Acceso inmediato',
-  },
-  {
-    image: noirAssets.zones.pool,
-    title: 'Piscina',
-    subtitle: 'Piso 20',
-    detail: 'Disponible desde 18:00',
-  },
-  {
-    image: noirAssets.zones.cava,
-    title: 'Cava privada',
-    subtitle: 'Sótano 1',
-    detail: 'Disponible fin de semana',
-  },
-];
+const ZONE_ICONS: Record<string, string> = {
+  Gimnasio: 'fitness-center',
+  Piscina: 'pool',
+  'Salón social': 'celebration',
+  'Zona BBQ': 'outdoor-grill',
+  Kiosko: 'local-cafe',
+  'Cava privada': 'wine-bar',
+};
 
-const commonCards = [
-  {
-    icon: 'deck',
-    title: 'Lobby privado',
-    subtitle: 'Acceso permanente',
-    body: 'Recepción, waiting lounge y acceso a concierge en primer nivel.',
-    status: 'Abierto 24/7',
-  },
-  {
-    icon: 'fitness-center',
-    title: 'Wellness core',
-    subtitle: 'Uso libre residentes',
-    body: 'Gimnasio, recovery room y zona de estiramiento sin reserva.',
-    status: 'Alta ocupación',
-  },
-  {
-    icon: 'local-cafe',
-    title: 'Coffee lounge',
-    subtitle: 'Cowork & social',
-    body: 'Espacio silencioso para reuniones breves, café y trabajo liviano.',
-    status: 'Disponible ahora',
-  },
-];
-
-const historyCards = [
-  {
-    title: 'Salón social',
-    date: '24 MAR 2026',
-    slot: '19:00 - 23:00',
-    status: 'Finalizada',
-    attendees: '08 asistentes',
-  },
-  {
-    title: 'Zona BBQ',
-    date: '18 MAR 2026',
-    slot: '14:00 - 18:00',
-    status: 'Aprobada',
-    attendees: '06 asistentes',
-  },
-  {
-    title: 'Kiosko',
-    date: '02 MAR 2026',
-    slot: '09:00 - 13:00',
-    status: 'Cancelada',
-    attendees: '03 asistentes',
-  },
-] as const;
+const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  pending: { bg: '#2a2a1a', text: '#ffd700' },
+  approved: { bg: '#1f3a24', text: '#8ef0a3' },
+  cancelled: { bg: '#3b1f1f', text: '#ffb4ab' },
+  completed: { bg: noirTheme.primary, text: '#000000' },
+};
 
 type SpacesTab = 'reservables' | 'comunes' | 'historial';
 
 export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
   const [activeTab, setActiveTab] = useState<SpacesTab>('reservables');
+  const [areas, setAreas] = useState<CommonArea[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [loadingAreas, setLoadingAreas] = useState(true);
+  const [loadingReservations, setLoadingReservations] = useState(false);
+
+  useEffect(() => {
+    getCommonAreas()
+      .then(setAreas)
+      .catch(() => {})
+      .finally(() => setLoadingAreas(false));
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'historial') {
+      setLoadingReservations(true);
+      getMyReservations()
+        .then(setReservations)
+        .catch(() => {})
+        .finally(() => setLoadingReservations(false));
+    }
+  }, [activeTab]);
+
+  const statusColors = (statusCode?: string) =>
+    STATUS_COLORS[statusCode ?? ''] ?? { bg: noirTheme.surfaceHigh, text: noirTheme.secondary };
 
   return (
     <NoirScreen>
@@ -132,10 +90,10 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
         <View style={styles.heroHeader}>
           <Headline style={styles.title}>
             {activeTab === 'reservables'
-              ? "Espacios\ndisponibles"
+              ? 'Espacios\ndisponibles'
               : activeTab === 'comunes'
-                ? "Zonas\nde uso libre"
-                : "Historial\nde reservas"}
+                ? 'Zonas\nde uso libre'
+                : 'Historial\nde reservas'}
           </Headline>
           <Eyebrow style={styles.description}>
             {activeTab === 'reservables'
@@ -148,87 +106,108 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
 
         {activeTab === 'reservables' ? (
           <>
-            <View style={styles.grid}>
-              {reservableCards.map(item => (
-                <HeroCard
-                  key={item.title}
-                  image={item.image}
-                  title={item.title}
-                  label={item.detail}
-                  subtitle={item.subtitle}
-                  onPrimaryPress={() =>
-                    pushScreen(componentId, COMPONENTS.createReservation)
-                  }
-                  onSecondaryPress={() =>
-                    pushScreen(componentId, COMPONENTS.zoneDetail)
-                  }
-                />
-              ))}
-            </View>
-
-            <View style={styles.loadMore}>
-              <Text style={styles.loadMoreLabel}>Cargar más</Text>
-            </View>
+            {loadingAreas ? (
+              <View style={styles.skeletonGrid}>
+                {[0, 1, 2].map((i) => (
+                  <View key={i} style={styles.skeleton} />
+                ))}
+              </View>
+            ) : (
+              <View style={styles.grid}>
+                {areas.map((area) => (
+                  <HeroCard
+                    key={area.id}
+                    image=""
+                    title={area.name}
+                    label={area.maxCapacity ? `Capacidad: ${area.maxCapacity} personas` : 'Disponible'}
+                    subtitle={area.name}
+                    onPrimaryPress={() =>
+                      pushScreen(componentId, COMPONENTS.createReservation, { areaId: area.id, areaName: area.name })
+                    }
+                    onSecondaryPress={() =>
+                      pushScreen(componentId, COMPONENTS.zoneDetail)
+                    }
+                  />
+                ))}
+              </View>
+            )}
           </>
         ) : null}
 
         {activeTab === 'comunes' ? (
           <View style={styles.sectionList}>
-            {commonCards.map(item => (
-              <View key={item.title} style={styles.commonCard}>
-                <View style={styles.commonTop}>
-                  <View style={styles.commonIconWrap}>
-                    <MaterialIcons color={noirTheme.primary} name={item.icon} size={22} />
+            {loadingAreas ? (
+              [0, 1, 2].map((i) => <View key={i} style={styles.skeleton} />)
+            ) : (
+              areas.map((area) => (
+                <View key={area.id} style={styles.commonCard}>
+                  <View style={styles.commonTop}>
+                    <View style={styles.commonIconWrap}>
+                      <MaterialIcons
+                        color={noirTheme.primary}
+                        name={ZONE_ICONS[area.name] ?? 'place'}
+                        size={22}
+                      />
+                    </View>
+                    <Text style={styles.commonStatus}>
+                      {area.maxCapacity ? `Máx. ${area.maxCapacity}` : 'Libre'}
+                    </Text>
                   </View>
-                  <Text style={styles.commonStatus}>{item.status}</Text>
+                  <View style={styles.commonCopy}>
+                    <Text style={styles.commonTitle}>{area.name}</Text>
+                    <Text style={styles.commonBody}>Espacio disponible para residentes del conjunto.</Text>
+                  </View>
                 </View>
-                <View style={styles.commonCopy}>
-                  <Text style={styles.commonTitle}>{item.title}</Text>
-                  <Text style={styles.commonSubtitle}>{item.subtitle}</Text>
-                  <Text style={styles.commonBody}>{item.body}</Text>
-                </View>
-              </View>
-            ))}
+              ))
+            )}
           </View>
         ) : null}
 
         {activeTab === 'historial' ? (
           <View style={styles.sectionList}>
-            {historyCards.map(item => (
-              <View key={`${item.title}-${item.date}`} style={styles.historyCard}>
-                <View style={styles.historyHeader}>
-                  <View>
-                    <Text style={styles.historyTitle}>{item.title}</Text>
-                    <Text style={styles.historyDate}>{item.date}</Text>
+            {loadingReservations ? (
+              [0, 1, 2].map((i) => <View key={i} style={styles.skeleton} />)
+            ) : reservations.length === 0 ? (
+              <Text style={styles.emptyText}>No tienes reservas registradas.</Text>
+            ) : (
+              reservations.map((res) => {
+                const sc = statusColors(res.status?.code);
+                return (
+                  <View key={res.id} style={styles.historyCard}>
+                    <View style={styles.historyHeader}>
+                      <View>
+                        <Text style={styles.historyTitle}>{res.area?.name ?? '—'}</Text>
+                        <Text style={styles.historyDate}>
+                          {new Date(res.reservationDate).toLocaleDateString('es-CO', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </View>
+                      <Text style={[styles.historyStatus, { backgroundColor: sc.bg, color: sc.text }]}>
+                        {res.status?.name ?? '—'}
+                      </Text>
+                    </View>
+                    <View style={styles.historyMetaRow}>
+                      <View style={styles.historyMetaBlock}>
+                        <Eyebrow>Horario</Eyebrow>
+                        <Text style={styles.historyMetaValue}>
+                          {res.startTime} – {res.endTime}
+                        </Text>
+                      </View>
+                      <View style={styles.historyMetaBlock}>
+                        <Eyebrow>Estado</Eyebrow>
+                        <Text style={styles.historyMetaValue}>{res.status?.name ?? '—'}</Text>
+                      </View>
+                    </View>
                   </View>
-                  <Text
-                    style={[
-                      styles.historyStatus,
-                      item.status === 'Finalizada'
-                        ? styles.historyStatusDone
-                        : item.status === 'Aprobada'
-                          ? styles.historyStatusApproved
-                          : styles.historyStatusCancelled,
-                    ]}>
-                    {item.status}
-                  </Text>
-                </View>
-                <View style={styles.historyMetaRow}>
-                  <View style={styles.historyMetaBlock}>
-                    <Eyebrow>Horario</Eyebrow>
-                    <Text style={styles.historyMetaValue}>{item.slot}</Text>
-                  </View>
-                  <View style={styles.historyMetaBlock}>
-                    <Eyebrow>Ocupación</Eyebrow>
-                    <Text style={styles.historyMetaValue}>{item.attendees}</Text>
-                  </View>
-                </View>
-              </View>
-            ))}
+                );
+              })
+            )}
           </View>
         ) : null}
       </View>
-
     </NoirScreen>
   );
 }
@@ -296,6 +275,19 @@ const styles = StyleSheet.create({
   sectionList: {
     gap: 16,
   },
+  skeletonGrid: {
+    gap: 18,
+  },
+  skeleton: {
+    height: 180,
+    backgroundColor: noirTheme.surfaceHigh,
+  },
+  emptyText: {
+    color: noirTheme.secondary,
+    textAlign: 'center',
+    marginTop: 40,
+    fontSize: 14,
+  },
   commonCard: {
     backgroundColor: noirTheme.surfaceLow,
     padding: 20,
@@ -333,13 +325,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: -1,
-  },
-  commonSubtitle: {
-    color: noirTheme.secondary,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.6,
-    textTransform: 'uppercase',
   },
   commonBody: {
     color: noirTheme.ink,
@@ -379,18 +364,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
-  historyStatusDone: {
-    backgroundColor: noirTheme.primary,
-    color: '#000000',
-  },
-  historyStatusApproved: {
-    backgroundColor: '#1f3a24',
-    color: '#8ef0a3',
-  },
-  historyStatusCancelled: {
-    backgroundColor: '#3b1f1f',
-    color: '#ffb4ab',
-  },
   historyMetaRow: {
     flexDirection: 'row',
     gap: 12,
@@ -405,19 +378,5 @@ const styles = StyleSheet.create({
     color: noirTheme.primary,
     fontSize: 16,
     fontWeight: '800',
-  },
-  loadMore: {
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 18,
-    marginBottom: 24,
-  },
-  loadMoreLabel: {
-    color: noirTheme.secondary,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 3,
-    textTransform: 'uppercase',
   },
 });

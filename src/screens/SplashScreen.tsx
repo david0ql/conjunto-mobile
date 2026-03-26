@@ -5,14 +5,31 @@ import { NoirScreen } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
 import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
+import { authStore } from '../context/auth.store';
+import { getMe } from '../services/api';
 
 export function SplashScreen() {
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      setShellRoot(COMPONENTS.login);
-    }, 1400);
+    async function bootstrap() {
+      await authStore.init();
 
-    return () => clearTimeout(timeout);
+      if (authStore.isAuthenticated()) {
+        // Verify the stored token is still valid
+        try {
+          await getMe();
+          setShellRoot(COMPONENTS.homeNews);
+        } catch {
+          // Token is invalid or expired — clear and go to login
+          await authStore.clearSession();
+          setShellRoot(COMPONENTS.login);
+        }
+      } else {
+        // No token stored — go to login after a short branded delay
+        setTimeout(() => setShellRoot(COMPONENTS.login), 1400);
+      }
+    }
+
+    bootstrap();
   }, []);
 
   return (

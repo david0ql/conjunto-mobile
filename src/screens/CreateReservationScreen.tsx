@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -15,67 +16,138 @@ import {
   PrimaryButton,
 } from '../components/NoirUI';
 import { NavigationComponentProps } from 'react-native-navigation';
-import { popScreen, setShellRoot } from '../navigation/root';
-import { COMPONENTS } from '../navigation/componentNames';
+import { popScreen } from '../navigation/root';
 import { noirTheme } from '../design/theme';
+import { authStore } from '../context/auth.store';
+import {
+  createReservation,
+  getReservationStatuses,
+  type ReservationStatus,
+} from '../services/api';
 
-const timeSlots = ['09:00 - 13:00', '14:00 - 18:00', '19:00 - 23:00'] as const;
+interface Props extends NavigationComponentProps {
+  areaId?: string;
+  areaName?: string;
+}
 
-export function CreateReservationScreen({ componentId }: NavigationComponentProps) {
+const TIME_SLOTS = [
+  { label: 'Mañana', start: '09:00', end: '13:00' },
+  { label: 'Tarde', start: '14:00', end: '18:00' },
+  { label: 'Noche', start: '19:00', end: '23:00' },
+] as const;
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function CreateReservationScreen({ componentId, areaId, areaName }: Props) {
+  const [date, setDate] = useState(todayIso());
   const [attendees, setAttendees] = useState(4);
-  const [slot, setSlot] = useState<(typeof timeSlots)[number]>(timeSlots[0]);
+  const [slotIdx, setSlotIdx] = useState(0);
+  const [notes, setNotes] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [statuses, setStatuses] = useState<ReservationStatus[]>([]);
+
+  useEffect(() => {
+    getReservationStatuses().then(setStatuses).catch(() => {});
+  }, []);
+
+  async function handleConfirm() {
+    if (!areaId) {
+      Alert.alert('Error', 'No se especificó el área a reservar.');
+      return;
+    }
+
+    const user = authStore.getUser();
+    if (!user) {
+      Alert.alert('Error', 'Sesión expirada. Inicia sesión nuevamente.');
+      return;
+    }
+
+    const pendingStatus = statuses.find(
+      (s) => s.code === 'pending' || s.code === 'pendiente',
+    ) ?? statuses[0];
+
+    if (!pendingStatus) {
+      Alert.alert('Error', 'No se pudo determinar el estado de la reserva.');
+      return;
+    }
+
+    const slot = TIME_SLOTS[slotIdx];
+
+    setLoading(true);
+    try {
+      await createReservation({
+        residentId: user.id,
+        areaId,
+        reservationDate: date,
+        startTime: slot.start,
+        endTime: slot.end,
+        statusId: pendingStatus.id,
+        notesByResident: notes.trim() || undefined,
+      });
+      Alert.alert('Reserva creada', 'Tu solicitud fue enviada y está pendiente de aprobación.', [
+        { text: 'OK', onPress: () => popScreen(componentId) },
+      ]);
+    } catch (error: any) {
+      Alert.alert('Error', error?.message ?? 'No fue posible crear la reserva.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <NoirScreen>
       <NoirTopBar
-        onLeftPress={() => {
-          popScreen(componentId);
-        }}
+        onLeftPress={() => popScreen(componentId)}
         leftIcon="arrow-back"
       />
 
       <View style={styles.content}>
         <Eyebrow>Reservación de espacios</Eyebrow>
         <Headline style={styles.title}>Crear reserva</Headline>
+        {areaName ? <Text style={styles.areaLabel}>{areaName}</Text> : null}
         <View style={styles.divider} />
 
         <View style={styles.section}>
-          <Eyebrow>01. Seleccionar fecha</Eyebrow>
+          <Eyebrow>01. Fecha (YYYY-MM-DD)</Eyebrow>
           <View style={styles.inputCard}>
-            <Text style={styles.dateValue}>2026-03-24</Text>
+            <TextInput
+              style={styles.dateInput}
+              value={date}
+              onChangeText={setDate}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={noirTheme.surfaceHighest}
+              maxLength={10}
+            />
           </View>
         </View>
 
         <View style={styles.section}>
           <Eyebrow>02. Asistentes</Eyebrow>
           <View style={styles.counterCard}>
-            <CounterButton label="remove" onPress={() => setAttendees(value => Math.max(1, value - 1))} />
+            <CounterButton label="remove" onPress={() => setAttendees((v) => Math.max(1, v - 1))} />
             <Text style={styles.counterValue}>{String(attendees).padStart(2, '0')}</Text>
-            <CounterButton label="add" onPress={() => setAttendees(value => value + 1)} />
+            <CounterButton label="add" onPress={() => setAttendees((v) => v + 1)} />
           </View>
         </View>
 
         <View style={styles.section}>
-          <Eyebrow>03. Horario disponible</Eyebrow>
+          <Eyebrow>03. Horario</Eyebrow>
           <View style={styles.slotGrid}>
-            {timeSlots.map(option => {
-              const isSelected = slot === option;
-              const disabled = option === timeSlots[2];
+            {TIME_SLOTS.map((slot, idx) => {
+              const isSelected = slotIdx === idx;
               return (
                 <Pressable
-                  key={option}
-                  disabled={disabled}
-                  onPress={() => setSlot(option)}
-                  style={[
-                    styles.slotCard,
-                    isSelected && styles.slotSelected,
-                    disabled && styles.slotDisabled,
-                  ]}>
+                  key={slot.label}
+                  onPress={() => setSlotIdx(idx)}
+                  style={[styles.slotCard, isSelected && styles.slotSelected]}>
                   <Text style={[styles.slotLabel, isSelected && styles.slotLabelSelected]}>
-                    {option === timeSlots[0] ? 'Mañana' : option === timeSlots[1] ? 'Tarde' : 'Noche'}
+                    {slot.label}
                   </Text>
-                  <Text style={[styles.slotValue, isSelected && styles.slotValueSelected]}>{option}</Text>
-                  {disabled ? <Text style={styles.unavailable}>No disponible</Text> : null}
+                  <Text style={[styles.slotValue, isSelected && styles.slotValueSelected]}>
+                    {slot.start} – {slot.end}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -91,6 +163,8 @@ export function CreateReservationScreen({ componentId }: NavigationComponentProp
               placeholder="Detalles específicos para la reserva..."
               placeholderTextColor="rgba(255,255,255,0.24)"
               style={styles.notesInput}
+              value={notes}
+              onChangeText={setNotes}
             />
           </View>
         </View>
@@ -104,10 +178,8 @@ export function CreateReservationScreen({ componentId }: NavigationComponentProp
         </View>
 
         <PrimaryButton
-          label="Confirmar reserva"
-          onPress={() => {
-            setShellRoot(COMPONENTS.zonesBrowse);
-          }}
+          label={loading ? 'Confirmando...' : 'Confirmar reserva'}
+          onPress={handleConfirm}
           style={styles.confirmButton}
           textStyle={styles.confirmButtonLabel}
         />
@@ -116,13 +188,7 @@ export function CreateReservationScreen({ componentId }: NavigationComponentProp
   );
 }
 
-function CounterButton({
-  label,
-  onPress,
-}: {
-  label: 'add' | 'remove';
-  onPress: () => void;
-}) {
+function CounterButton({ label, onPress }: { label: 'add' | 'remove'; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={styles.counterButton}>
       <MaterialIcons color={noirTheme.primary} name={label} size={20} />
@@ -140,6 +206,14 @@ const styles = StyleSheet.create({
     fontSize: 52,
     lineHeight: 52,
   },
+  areaLabel: {
+    color: noirTheme.secondary,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: -16,
+  },
   divider: {
     width: 96,
     height: 4,
@@ -153,7 +227,7 @@ const styles = StyleSheet.create({
     backgroundColor: noirTheme.surfaceLow,
     padding: 20,
   },
-  dateValue: {
+  dateInput: {
     color: noirTheme.primary,
     fontSize: 28,
     fontWeight: '800',
@@ -192,9 +266,6 @@ const styles = StyleSheet.create({
   slotSelected: {
     backgroundColor: noirTheme.primary,
   },
-  slotDisabled: {
-    opacity: 0.4,
-  },
   slotLabel: {
     color: noirTheme.secondary,
     fontSize: 11,
@@ -212,13 +283,6 @@ const styles = StyleSheet.create({
   },
   slotValueSelected: {
     color: '#000000',
-  },
-  unavailable: {
-    color: '#ffb4ab',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
   },
   notesCard: {
     backgroundColor: noirTheme.surfaceLow,

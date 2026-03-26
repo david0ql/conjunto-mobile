@@ -200,8 +200,14 @@ export function setShellRoot(name: ComponentName) {
   return Navigation.setRoot(buildMainTabsRoot(selectedTab) as any);
 }
 
-export function pushScreen(componentId: string, name: ComponentName) {
-  return Navigation.push(componentId, stackComponent(name));
+export function pushScreen(componentId: string, name: ComponentName, passProps?: Record<string, unknown>) {
+  return Navigation.push(componentId, {
+    component: {
+      name,
+      passProps,
+      options: defaultComponentOptions,
+    },
+  });
 }
 
 export function popScreen(componentId: string) {

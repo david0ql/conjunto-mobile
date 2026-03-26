@@ -1,32 +1,145 @@
-import React, { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {
   Eyebrow,
   NoirScreen,
   NoirTopBar,
 } from '../components/NoirUI';
-import { noirAssets } from '../design/assets';
 import { noirTheme } from '../design/theme';
+import {
+  getMyPackages,
+  getMyAccessEntries,
+  getPackagePhotos,
+  resolveImageUrl,
+  type PackageItem,
+  type PackagePhoto,
+  type AccessEntry,
+} from '../services/api';
 
-const packages = [
-  ['Amazon Prime', 'Tracking #8842-X', 'Pendiente', '14 MIN', 'local-shipping', true],
-  ['Mercado Libre', 'Tracking #0192-A', 'Entregado', '09:42 AM', 'check-circle', false],
-  ['Restaurante local', 'Pedido de alimentos', 'Entregado', '08:15 AM', 'restaurant', false],
-] as const;
+function formatRelativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'Ahora';
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
 
-const visitors = [
-  ['Alejandro Marín', 'Visitante personal', '11:05 AM', 'HOY', noirAssets.visitors.visitor1],
-  ['Sofia Larrea', 'Visitante personal', '09:12 AM', 'HOY', noirAssets.visitors.visitor2],
-  ['Luis Fernando G.', 'Servicio técnico', '08:45 AM', 'AYER', noirAssets.visitors.technician],
-] as const;
+// ─── Package photos modal ─────────────────────────────────────────────────────
+
+function PackagePhotosModal({
+  pkg,
+  onClose,
+}: {
+  pkg: PackageItem | null;
+  onClose: () => void;
+}) {
+  const [photos, setPhotos] = useState<PackagePhoto[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pkg) return;
+    setLoading(true);
+    setPhotos([]);
+    getPackagePhotos(pkg.id)
+      .then(setPhotos)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [pkg?.id]);
+
+  if (!pkg) return null;
+
+  return (
+    <Modal
+      visible={!!pkg}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}>
+      <View style={modalStyles.container}>
+        <View style={modalStyles.header}>
+          <Text style={modalStyles.title}>Fotos del paquete</Text>
+          <Pressable onPress={onClose} style={modalStyles.closeBtn}>
+            <MaterialIcons color={noirTheme.primary} name="close" size={24} />
+          </Pressable>
+        </View>
+
+        <Text style={modalStyles.desc}>
+          {pkg.description ?? 'Paquete sin descripción'}
+        </Text>
+
+        <ScrollView contentContainerStyle={modalStyles.photoGrid}>
+          {loading ? (
+            <ActivityIndicator color={noirTheme.primary} size="large" style={{ marginTop: 40 }} />
+          ) : photos.length === 0 ? (
+            <View style={modalStyles.empty}>
+              <MaterialIcons color={noirTheme.surfaceHighest} name="image-not-supported" size={48} />
+              <Text style={modalStyles.emptyText}>Sin fotos registradas</Text>
+            </View>
+          ) : (
+            photos.map((photo) => {
+              const uri = resolveImageUrl(photo.filePath);
+              return uri ? (
+                <Image
+                  key={photo.id}
+                  source={{ uri }}
+                  style={modalStyles.photo}
+                  resizeMode="cover"
+                />
+              ) : null;
+            })
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
 
 export function PorteriaLogScreen() {
   const [activeTab, setActiveTab] = useState<'packages' | 'entries'>('packages');
+  const [packages, setPackages] = useState<PackageItem[]>([]);
+  const [entries, setEntries] = useState<AccessEntry[]>([]);
+  const [loadingPackages, setLoadingPackages] = useState(true);
+  const [loadingEntries, setLoadingEntries] = useState(false);
+  const [selectedPkg, setSelectedPkg] = useState<PackageItem | null>(null);
+
+  useEffect(() => {
+    getMyPackages()
+      .then(setPackages)
+      .catch(() => {})
+      .finally(() => setLoadingPackages(false));
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'entries') {
+      setLoadingEntries(true);
+      getMyAccessEntries()
+        .then(setEntries)
+        .catch(() => {})
+        .finally(() => setLoadingEntries(false));
+    }
+  }, [activeTab]);
+
+  const pendingPackages = packages.filter((p) => !p.delivered);
 
   return (
     <NoirScreen>
       <NoirTopBar />
+
+      <PackagePhotosModal pkg={selectedPkg} onClose={() => setSelectedPkg(null)} />
 
       <View style={styles.content}>
         <View style={styles.tabs}>
@@ -40,41 +153,72 @@ export function PorteriaLogScreen() {
 
         {activeTab === 'packages' ? (
           <View style={styles.grid}>
-            {packages.map(item => (
-              <View
-                key={item[1]}
-                style={[
-                  styles.packageCard,
-                  item[5] ? styles.packageCardStrong : styles.packageCardMuted,
-                ]}>
-                <View style={styles.packageTop}>
-                  <View style={styles.packageCopy}>
-                    <Eyebrow>{item[0]}</Eyebrow>
-                    <Text style={styles.packageTitle}>{item[1]}</Text>
-                  </View>
-                  <Text style={[styles.packageStatus, item[5] && styles.packageStatusStrong]}>
-                    {item[2]}
-                  </Text>
-                </View>
-                <View style={styles.packageBottom}>
-                  <View>
-                    <Text style={styles.packageMeta}>Recibido hace</Text>
-                    <Text style={styles.packageTime}>{item[3]}</Text>
-                  </View>
-                  <MaterialIcons
-                    color={item[5] ? noirTheme.outline : noirTheme.primary}
-                    name={item[4]}
-                    size={32}
-                  />
-                </View>
-              </View>
-            ))}
+            {loadingPackages ? (
+              [0, 1, 2].map((i) => <View key={i} style={styles.skeleton} />)
+            ) : packages.length === 0 ? (
+              <Text style={styles.emptyText}>No hay paquetes registrados.</Text>
+            ) : (
+              packages.map((pkg) => {
+                const isPending = !pkg.delivered;
+                return (
+                  <Pressable
+                    key={pkg.id}
+                    onPress={() => setSelectedPkg(pkg)}
+                    style={[
+                      styles.packageCard,
+                      isPending ? styles.packageCardStrong : styles.packageCardMuted,
+                    ]}>
+                    <View style={styles.packageTop}>
+                      <View style={styles.packageCopy}>
+                        <Eyebrow>Paquete · Toca para ver fotos</Eyebrow>
+                        <Text style={styles.packageTitle}>
+                          {pkg.description ?? 'Paquete sin descripción'}
+                        </Text>
+                      </View>
+                      <Text style={[styles.packageStatus, isPending && styles.packageStatusStrong]}>
+                        {isPending ? 'Pendiente' : 'Entregado'}
+                      </Text>
+                    </View>
+                    <View style={styles.packageBottom}>
+                      <View>
+                        <Text style={styles.packageMeta}>
+                          {isPending ? 'Recibido hace' : 'Entregado hace'}
+                        </Text>
+                        <Text style={styles.packageTime}>
+                          {formatRelativeTime(
+                            isPending ? pkg.arrivalTime : (pkg.deliveredTime ?? pkg.arrivalTime),
+                          )}
+                        </Text>
+                      </View>
+                      <View style={styles.photoHint}>
+                        <MaterialIcons
+                          color={isPending ? noirTheme.outline : noirTheme.primary}
+                          name={isPending ? 'local-shipping' : 'check-circle'}
+                          size={28}
+                        />
+                        <MaterialIcons
+                          color={noirTheme.secondary}
+                          name="photo-library"
+                          size={18}
+                        />
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
 
-            <View style={styles.whiteCard}>
-              <Eyebrow style={styles.whiteEyebrow}>Notificaciones</Eyebrow>
-              <Text style={styles.whiteTitle}>Tiene 1 paquete pendiente</Text>
-              <Text style={styles.whiteLink}>Notificar recepción</Text>
-            </View>
+            {pendingPackages.length > 0 ? (
+              <View style={styles.whiteCard}>
+                <Eyebrow style={styles.whiteEyebrow}>Notificaciones</Eyebrow>
+                <Text style={styles.whiteTitle}>
+                  {pendingPackages.length === 1
+                    ? 'Tiene 1 paquete pendiente'
+                    : `Tiene ${pendingPackages.length} paquetes pendientes`}
+                </Text>
+                <Text style={styles.whiteLink}>Contacte a portería para retirarlos</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -82,31 +226,118 @@ export function PorteriaLogScreen() {
           <View style={styles.visitorsSection}>
             <View style={styles.visitorsHeader}>
               <Text style={styles.visitorsTitle}>Ingresos recientes</Text>
-              <Text style={styles.visitorsLink}>Ver todo el historial</Text>
             </View>
 
-            {visitors.map(item => (
-              <View key={item[0]} style={styles.visitorRow}>
-                <View style={styles.visitorIdentity}>
-                  <Image source={{ uri: item[4] }} style={styles.visitorAvatar} />
-                  <View>
-                    <Text style={styles.visitorName}>{item[0]}</Text>
-                    <Text style={styles.visitorRole}>{item[1]}</Text>
+            {loadingEntries ? (
+              [0, 1, 2].map((i) => <View key={i} style={[styles.skeleton, { height: 80 }]} />)
+            ) : entries.length === 0 ? (
+              <Text style={styles.emptyText}>No hay ingresos registrados para tu apartamento.</Text>
+            ) : (
+              entries.map((entry) => {
+                const visitorName = entry.visitor
+                  ? `${entry.visitor.name} ${entry.visitor.lastName}`
+                  : entry.vehicle
+                    ? 'Vehículo'
+                    : 'Residente';
+
+                return (
+                  <View key={entry.id} style={styles.visitorRow}>
+                    <View style={styles.visitorIdentity}>
+                      <View style={styles.visitorAvatarPlaceholder}>
+                        <MaterialIcons
+                          color={noirTheme.primary}
+                          name={entry.vehicle ? 'directions-car' : 'person'}
+                          size={28}
+                        />
+                      </View>
+                      <View>
+                        <Text style={styles.visitorName}>{visitorName}</Text>
+                        <Text style={styles.visitorRole}>
+                          {entry.vehicle ? 'Vehículo' : 'Visita personal'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.visitorTimeWrap}>
+                      <Text style={styles.visitorTime}>
+                        {new Date(entry.entryTime).toLocaleTimeString('es-CO', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </Text>
+                      <Text style={styles.visitorDay}>
+                        {new Date(entry.entryTime).toLocaleDateString('es-CO', {
+                          day: 'numeric',
+                          month: 'short',
+                        })}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-                <View style={styles.visitorTimeWrap}>
-                  <Text style={styles.visitorTime}>{item[2]}</Text>
-                  <Text style={styles.visitorDay}>{item[3]}</Text>
-                </View>
-              </View>
-            ))}
+                );
+              })
+            )}
           </View>
         ) : null}
       </View>
-
     </NoirScreen>
   );
 }
+
+const modalStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: noirTheme.background,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    backgroundColor: noirTheme.surfaceLow,
+  },
+  title: {
+    color: noirTheme.primary,
+    fontSize: 22,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: -0.8,
+  },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  desc: {
+    color: noirTheme.secondary,
+    fontSize: 13,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    letterSpacing: 0.5,
+  },
+  photoGrid: {
+    padding: 16,
+    gap: 12,
+  },
+  photo: {
+    width: '100%',
+    height: 280,
+    backgroundColor: noirTheme.surfaceLow,
+  },
+  empty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    paddingTop: 60,
+  },
+  emptyText: {
+    color: noirTheme.secondary,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+});
 
 const styles = StyleSheet.create({
   content: {
@@ -137,6 +368,17 @@ const styles = StyleSheet.create({
   },
   grid: {
     gap: 16,
+  },
+  skeleton: {
+    height: 190,
+    backgroundColor: noirTheme.surfaceHigh,
+  },
+  emptyText: {
+    color: noirTheme.secondary,
+    textAlign: 'center',
+    marginTop: 40,
+    fontSize: 14,
+    lineHeight: 22,
   },
   packageCard: {
     minHeight: 190,
@@ -193,6 +435,11 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: -1,
   },
+  photoHint: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+  },
   whiteCard: {
     backgroundColor: noirTheme.primary,
     padding: 20,
@@ -232,13 +479,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase',
   },
-  visitorsLink: {
-    color: noirTheme.secondary,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-  },
   visitorRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -253,9 +493,12 @@ const styles = StyleSheet.create({
     gap: 16,
     flex: 1,
   },
-  visitorAvatar: {
+  visitorAvatarPlaceholder: {
     width: 64,
     height: 64,
+    backgroundColor: noirTheme.surfaceHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   visitorName: {
     color: noirTheme.primary,

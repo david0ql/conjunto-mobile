@@ -3,6 +3,7 @@ import { COMPONENTS } from './componentNames';
 import { SplashScreen } from '../screens/SplashScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { HomeNewsScreen } from '../screens/HomeNewsScreen';
+import { NewsDetailScreen } from '../screens/NewsDetailScreen';
 import { ZonesBrowseScreen } from '../screens/ZonesBrowseScreen';
 import { ZoneDetailScreen } from '../screens/ZoneDetailScreen';
 import { PorteriaLogScreen } from '../screens/PorteriaLogScreen';
@@ -13,12 +14,10 @@ export function registerScreens() {
   Navigation.registerComponent(COMPONENTS.splash, () => SplashScreen);
   Navigation.registerComponent(COMPONENTS.login, () => LoginScreen);
   Navigation.registerComponent(COMPONENTS.homeNews, () => HomeNewsScreen);
+  Navigation.registerComponent(COMPONENTS.newsDetail, () => NewsDetailScreen);
   Navigation.registerComponent(COMPONENTS.zonesBrowse, () => ZonesBrowseScreen);
   Navigation.registerComponent(COMPONENTS.zoneDetail, () => ZoneDetailScreen);
   Navigation.registerComponent(COMPONENTS.porteriaLog, () => PorteriaLogScreen);
-  Navigation.registerComponent(
-    COMPONENTS.createReservation,
-    () => CreateReservationScreen,
-  );
+  Navigation.registerComponent(COMPONENTS.createReservation, () => CreateReservationScreen);
   Navigation.registerComponent(COMPONENTS.profileQr, () => ProfileQrScreen);
 }

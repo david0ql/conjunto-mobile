@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ImageBackground,
   ScrollView,
@@ -14,54 +14,28 @@ import {
   PrimaryButton,
   noirStyles,
 } from '../components/NoirUI';
-import { noirAssets } from '../design/assets';
 import { noirTheme } from '../design/theme';
 import { COMPONENTS } from '../navigation/componentNames';
-import { setShellRoot } from '../navigation/root';
+import { pushScreen } from '../navigation/root';
+import { NavigationComponentProps } from 'react-native-navigation';
+import { getNews, resolveImageUrl, type NewsItem } from '../services/api';
+import { authStore } from '../context/auth.store';
 
-const recent = [
-  {
-    image: noirAssets.news.recent1,
-    tag: 'Actualización',
-    title: 'Mantenimiento de ascensores torre A',
-  },
-  {
-    image: noirAssets.news.recent2,
-    tag: 'Evento',
-    title: 'Cata de vinos en el rooftop',
-  },
-  {
-    image: noirAssets.news.recent3,
-    tag: 'Aviso',
-    title: 'Nuevos protocolos de acceso',
-  },
-];
+export function HomeNewsScreen({ componentId }: NavigationComponentProps) {
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const user = authStore.getUser();
 
-const community = [
-  {
-    image: noirAssets.news.community1,
-    tag: 'Seguridad',
-    title: 'Implementación de reconocimiento biométrico',
-    body:
-      'A partir del próximo mes, el acceso principal y áreas comunes contarán con tecnología de última generación para garantizar la exclusividad y calma de su residencia.',
-  },
-  {
-    image: noirAssets.news.community2,
-    tag: 'Servicios',
-    title: 'Expansión de concierge personalizado',
-    body:
-      'Hemos ampliado nuestro equipo de asistencia 24/7 para cubrir necesidades de logística privada, reservas internacionales y gestión de espacios gourmet.',
-  },
-  {
-    image: noirAssets.news.community3,
-    tag: 'Espacios',
-    title: 'Renovación del centro de negocios',
-    body:
-      'Nuevas estaciones de trabajo con aislamiento acústico y sistemas de videoconferencia premium están listas para su uso exclusivo en el piso 12.',
-  },
-];
+  useEffect(() => {
+    getNews()
+      .then((items) => setNews(items.slice(0, 10)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
-export function HomeNewsScreen() {
+  const recent = news.slice(0, 3);
+  const community = news.slice(3, 6);
+
   return (
     <NoirScreen>
       <NoirTopBar />
@@ -69,72 +43,94 @@ export function HomeNewsScreen() {
       <View style={styles.content}>
         <View style={styles.header}>
           <Eyebrow>Bienvenido a casa</Eyebrow>
-          <Headline style={styles.greeting}>Hola,{'\n'}Alexander</Headline>
+          <Headline style={styles.greeting}>
+            Hola,{'\n'}
+            {user ? user.name : '—'}
+          </Headline>
         </View>
 
         <View style={noirStyles.section}>
           <View style={styles.sectionRow}>
             <Eyebrow>Recientes</Eyebrow>
-            <View style={styles.dots}>
-              <View style={styles.dotActive} />
-              <View style={styles.dot} />
-              <View style={styles.dot} />
-            </View>
+            {recent.length > 0 ? (
+              <View style={styles.dots}>
+                {recent.map((_, i) => (
+                  <View key={i} style={i === 0 ? styles.dotActive : styles.dot} />
+                ))}
+              </View>
+            ) : null}
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.recentScroller}>
-            {recent.map(item => (
-              <ImageBackground
-                key={item.title}
-                source={{ uri: item.image }}
-                style={styles.recentCard}
-                imageStyle={styles.cardImage}>
-                <View style={styles.cardOverlay} />
-                <View style={styles.recentCardContent}>
-                  <Text style={styles.tag}>{item.tag}</Text>
-                  <Text style={styles.recentTitle}>{item.title}</Text>
-                </View>
-              </ImageBackground>
-            ))}
-          </ScrollView>
+          {loading ? (
+            <View style={styles.skeletonRow}>
+              {[0, 1, 2].map((i) => (
+                <View key={i} style={styles.skeletonCard} />
+              ))}
+            </View>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.recentScroller}>
+              {recent.map((item) => {
+                const imgUri = resolveImageUrl(item.imageUrl);
+                return (
+                  <ImageBackground
+                    key={item.id}
+                    source={imgUri ? { uri: imgUri } : undefined}
+                    style={styles.recentCard}
+                    imageStyle={styles.cardImage}>
+                    <View style={styles.cardOverlay} />
+                    <View style={styles.recentCardContent}>
+                      <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
+                      <Text style={styles.recentTitle}>{item.title}</Text>
+                    </View>
+                  </ImageBackground>
+                );
+              })}
+            </ScrollView>
+          )}
         </View>
 
         <View style={noirStyles.section}>
           <Eyebrow>Comunidad</Eyebrow>
           <View style={styles.line} />
-          {community.map((item, index) => (
-            <View
-              key={item.title}
-              style={[styles.communityCard, index === 1 && styles.communityOffset]}>
-              <ImageBackground
-                source={{ uri: item.image }}
-                style={styles.communityImage}
-                imageStyle={styles.cardImage}>
-                <View style={styles.communityTagWrap}>
-                  <Text style={styles.tag}>{item.tag}</Text>
-                </View>
-              </ImageBackground>
-              <Text style={styles.communityTitle}>{item.title}</Text>
-              <Text style={styles.communityBody}>{item.body}</Text>
-              <PrimaryButton
-                label="Leer documento"
-                onPress={() => {
-                  setShellRoot(
-                    item.tag === 'Espacios'
-                      ? COMPONENTS.zonesBrowse
-                      : COMPONENTS.porteriaLog,
-                  );
-                }}
-                style={styles.readButton}
-              />
-            </View>
-          ))}
+          {community.map((item) => {
+            const imgUri = resolveImageUrl(item.imageUrl);
+            return (
+              <View key={item.id} style={styles.communityCard}>
+                {imgUri ? (
+                  <ImageBackground
+                    source={{ uri: imgUri }}
+                    style={styles.communityImage}
+                    imageStyle={styles.cardImage}>
+                    <View style={styles.communityTagWrap}>
+                      <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
+                    </View>
+                  </ImageBackground>
+                ) : (
+                  <View style={[styles.communityImage, styles.communityImagePlaceholder]}>
+                    <View style={styles.communityTagWrap}>
+                      <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
+                    </View>
+                  </View>
+                )}
+                <Text style={styles.communityTitle}>{item.title}</Text>
+                <Text style={styles.communityBody} numberOfLines={4}>
+                  {item.content}
+                </Text>
+                <PrimaryButton
+                  label="Leer documento"
+                  onPress={() =>
+                    pushScreen(componentId, COMPONENTS.newsDetail, { newsId: item.id })
+                  }
+                  style={styles.readButton}
+                />
+              </View>
+            );
+          })}
         </View>
       </View>
-
     </NoirScreen>
   );
 }
@@ -172,6 +168,15 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 999,
     backgroundColor: noirTheme.primary,
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    gap: 18,
+  },
+  skeletonCard: {
+    width: 312,
+    height: 204,
+    backgroundColor: noirTheme.surfaceHigh,
   },
   recentScroller: {
     gap: 18,
@@ -222,13 +227,13 @@ const styles = StyleSheet.create({
   communityCard: {
     gap: 18,
   },
-  communityOffset: {
-    marginTop: 22,
-  },
   communityImage: {
-    height: 360,
+    height: 260,
     justifyContent: 'flex-start',
     backgroundColor: noirTheme.surfaceLow,
+  },
+  communityImagePlaceholder: {
+    backgroundColor: noirTheme.surfaceHigh,
   },
   communityTagWrap: {
     padding: 18,

@@ -2,6 +2,7 @@ export const COMPONENTS = {
   splash: 'app.splash',
   login: 'app.login',
   homeNews: 'app.homeNews',
+  newsDetail: 'app.newsDetail',
   zonesBrowse: 'app.zonesBrowse',
   zoneDetail: 'app.zoneDetail',
   porteriaLog: 'app.porteriaLog',

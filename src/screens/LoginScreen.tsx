@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,8 +14,48 @@ import { Divider, Eyebrow, Headline, NoirScreen, PrimaryButton } from '../compon
 import { noirTheme } from '../design/theme';
 import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
+import { loginResident, ApiError } from '../services/api';
+import { authStore } from '../context/auth.store';
 
 export function LoginScreen() {
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function handleLogin() {
+    const id = identifier.trim();
+    const pw = password.trim();
+
+    if (!id || !pw) {
+      Alert.alert('Campos requeridos', 'Ingresa tu correo/documento y contraseña.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await loginResident(id, pw);
+      await authStore.setSession(response.accessToken, response.user);
+      setShellRoot(COMPONENTS.homeNews);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 403) {
+          Alert.alert(
+            'Sin apartamento asignado',
+            'Tu cuenta no tiene un apartamento asignado aún. Contacta a la administración.',
+          );
+        } else if (error.status === 401) {
+          Alert.alert('Credenciales incorrectas', 'Verifica tu correo/documento y contraseña.');
+        } else {
+          Alert.alert('Error', error.message || 'No fue posible iniciar sesión.');
+        }
+      } else {
+        Alert.alert('Error de conexión', 'No se pudo conectar al servidor. Verifica tu red.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <NoirScreen scroll={false}>
       <KeyboardAvoidingView
@@ -43,47 +85,49 @@ export function LoginScreen() {
           </View>
 
           <View style={styles.form}>
-            <Field label="Correo Electrónico" placeholder="usuario@monolith.res" />
-            <Field label="Contraseña" placeholder="••••••••" secureTextEntry />
+            <View style={styles.field}>
+              <Eyebrow>Correo / Documento</Eyebrow>
+              <TextInput
+                placeholder="usuario@monolith.res"
+                placeholderTextColor={noirTheme.surfaceHighest}
+                style={styles.input}
+                value={identifier}
+                onChangeText={setIdentifier}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                autoCorrect={false}
+              />
+            </View>
 
-            <Pressable style={styles.rememberRow}>
-              <View style={styles.checkbox} />
-              <Text style={styles.smallLabel}>Recordarme</Text>
-            </Pressable>
+            <View style={styles.field}>
+              <Eyebrow>Contraseña</Eyebrow>
+              <TextInput
+                placeholder="••••••••"
+                placeholderTextColor={noirTheme.surfaceHighest}
+                secureTextEntry
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                onSubmitEditing={handleLogin}
+              />
+            </View>
 
             <PrimaryButton
-              label="Ingresar"
-              onPress={() => {
-                setShellRoot(COMPONENTS.homeNews);
-              }}
+              label={loading ? '' : 'Ingresar'}
+              onPress={handleLogin}
               style={styles.loginButton}
+              textStyle={loading ? { display: 'none' } : undefined}
             />
+            {loading ? (
+              <ActivityIndicator
+                color="#000"
+                style={StyleSheet.absoluteFill}
+              />
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
     </NoirScreen>
-  );
-}
-
-function Field({
-  label,
-  placeholder,
-  secureTextEntry,
-}: {
-  label: string;
-  placeholder: string;
-  secureTextEntry?: boolean;
-}) {
-  return (
-    <View style={styles.field}>
-      <Eyebrow>{label}</Eyebrow>
-      <TextInput
-        placeholder={placeholder}
-        placeholderTextColor={noirTheme.surfaceHighest}
-        secureTextEntry={secureTextEntry}
-        style={styles.input}
-      />
-    </View>
   );
 }
 
@@ -170,25 +214,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: noirTheme.outline,
     paddingVertical: 12,
-  },
-  rememberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    alignSelf: 'flex-start',
-  },
-  checkbox: {
-    width: 16,
-    height: 16,
-    borderWidth: 1,
-    borderColor: noirTheme.outline,
-  },
-  smallLabel: {
-    color: noirTheme.secondary,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
   },
   loginButton: {
     marginTop: 8,
