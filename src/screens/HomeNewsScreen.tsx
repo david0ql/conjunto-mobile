@@ -34,7 +34,7 @@ export function HomeNewsScreen({ componentId }: NavigationComponentProps) {
   }, []);
 
   const recent = news.slice(0, 3);
-  const community = news.slice(3, 6);
+  const community = news.slice(0, 10);
 
   return (
     <NoirScreen>

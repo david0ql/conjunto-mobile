@@ -9,7 +9,7 @@ import { authStore } from '../context/auth.store';
 // - iOS Simulator: http://localhost:3000
 // - Android Emulator: http://10.0.2.2:3000
 // - Physical device: http://<YOUR_MACHINE_IP>:3000
-export const API_BASE = 'http://10.0.2.2:3000/api/v1';
+export const API_BASE = 'https://api-conjunto.nordikhat.com/api/v1';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -247,7 +247,7 @@ export async function getMyQr(): Promise<{ dataUrl: string; residentId: string }
 // ─── Image URL helper ─────────────────────────────────────────────────────────
 
 export function resolveImageUrl(path: string | null | undefined): string | null {
-  if (!path) return null;
+  if (!path || !path.trim()) return null;
   if (path.startsWith('http')) return path;
   const base = API_BASE.replace('/api/v1', '');
   return `${base}/${path.replace(/^\//, '')}`;
