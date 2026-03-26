@@ -11,6 +11,7 @@ import { noirTheme } from '../design/theme';
 import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
+import { callService } from '../realtime/calls/callService';
 import {
   getMyProfile,
   getMyApartments,
@@ -51,6 +52,7 @@ export function ProfileQrScreen() {
   }, [apartments, selectedAptIdx]);
 
   async function handleLogout() {
+    callService.stop();
     await authStore.clearSession();
     setShellRoot(COMPONENTS.login);
   }

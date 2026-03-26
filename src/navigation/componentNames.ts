@@ -8,6 +8,7 @@ export const COMPONENTS = {
   porteriaLog: 'app.porteriaLog',
   createReservation: 'app.createReservation',
   profileQr: 'app.profileQr',
+  intercomCall: 'app.intercomCall',
 } as const;
 
 export type ComponentName = (typeof COMPONENTS)[keyof typeof COMPONENTS];

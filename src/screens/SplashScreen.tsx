@@ -7,6 +7,7 @@ import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
 import { getMe } from '../services/api';
+import { callService } from '../realtime/calls/callService';
 
 export function SplashScreen() {
   useEffect(() => {
@@ -17,14 +18,20 @@ export function SplashScreen() {
         // Verify the stored token is still valid
         try {
           await getMe();
+          const token = authStore.getToken();
+          if (token) {
+            callService.start(token);
+          }
           setShellRoot(COMPONENTS.homeNews);
         } catch {
           // Token is invalid or expired — clear and go to login
+          callService.stop();
           await authStore.clearSession();
           setShellRoot(COMPONENTS.login);
         }
       } else {
         // No token stored — go to login after a short branded delay
+        callService.stop();
         setTimeout(() => setShellRoot(COMPONENTS.login), 1400);
       }
     }

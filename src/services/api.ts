@@ -10,6 +10,7 @@ import { authStore } from '../context/auth.store';
 // - Android Emulator: http://10.0.2.2:3000
 // - Physical device: http://<YOUR_MACHINE_IP>:3000
 export const API_BASE = 'https://api-conjunto.nordikhat.com/api/v1';
+export const REALTIME_URL = API_BASE.replace(/\/api\/v1$/, '');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,6 +128,14 @@ export interface ResidentProfile {
   } | null;
 }
 
+export interface CallsIceConfigResponse {
+  iceServers: Array<{
+    urls: string | string[];
+    username?: string;
+    credential?: string;
+  }>;
+}
+
 // ─── HTTP client ──────────────────────────────────────────────────────────────
 
 async function request<T>(
@@ -241,8 +250,9 @@ export async function getCommunitySpaces(): Promise<CommunitySpace[]> {
 
 // ─── Access Audit ─────────────────────────────────────────────────────────────
 
-export async function getMyAccessEntries(): Promise<AccessEntry[]> {
-  return request<AccessEntry[]>('GET', '/access-audit/my');
+export async function getMyAccessEntries(apartmentId?: string): Promise<AccessEntry[]> {
+  const qs = apartmentId ? `?apartmentId=${apartmentId}` : '';
+  return request<AccessEntry[]>('GET', `/access-audit/my${qs}`);
 }
 
 // ─── Resident Profile ─────────────────────────────────────────────────────────
@@ -257,6 +267,10 @@ export async function getMyApartments(): Promise<ResidentApartment[]> {
 
 export async function getMyQr(apartmentId: string): Promise<{ dataUrl: string; residentId: string; apartmentId: string }> {
   return request<{ dataUrl: string; residentId: string; apartmentId: string }>('GET', `/residents/me/qr?apartmentId=${apartmentId}`);
+}
+
+export async function getCallsIceConfig(): Promise<CallsIceConfigResponse> {
+  return request<CallsIceConfigResponse>('GET', '/calls/ice-config');
 }
 
 // ─── Image URL helper ─────────────────────────────────────────────────────────

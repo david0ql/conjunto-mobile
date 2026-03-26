@@ -16,6 +16,7 @@ import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { loginResident, ApiError } from '../services/api';
 import { authStore } from '../context/auth.store';
+import { callService } from '../realtime/calls/callService';
 
 export function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
@@ -35,6 +36,7 @@ export function LoginScreen() {
     try {
       const response = await loginResident(id, pw);
       await authStore.setSession(response.accessToken, response.user);
+      callService.start(response.accessToken);
       setShellRoot(COMPONENTS.homeNews);
     } catch (error) {
       if (error instanceof ApiError) {

@@ -19,11 +19,13 @@ import { noirTheme } from '../design/theme';
 import {
   getMyPackages,
   getMyAccessEntries,
+  getMyApartments,
   getPackagePhotos,
   resolveImageUrl,
   type PackageItem,
   type PackagePhoto,
   type AccessEntry,
+  type ResidentApartment,
 } from '../services/api';
 
 function formatRelativeTime(dateStr: string): string {
@@ -112,10 +114,14 @@ export function PorteriaLogScreen() {
   const [activeTab, setActiveTab] = useState<'packages' | 'entries'>('packages');
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [entries, setEntries] = useState<AccessEntry[]>([]);
+  const [apartments, setApartments] = useState<ResidentApartment[]>([]);
+  const [selectedAptIdx, setSelectedAptIdx] = useState(0);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPkg, setSelectedPkg] = useState<PackageItem | null>(null);
+
+  const selectedAptId = apartments[selectedAptIdx]?.apartmentId;
 
   function fetchPackages() {
     getMyPackages()
@@ -124,9 +130,9 @@ export function PorteriaLogScreen() {
       .finally(() => setLoadingPackages(false));
   }
 
-  function fetchEntries() {
+  function fetchEntries(aptId?: string) {
     setLoadingEntries(true);
-    getMyAccessEntries()
+    getMyAccessEntries(aptId)
       .then(setEntries)
       .catch(() => {})
       .finally(() => setLoadingEntries(false));
@@ -135,15 +141,18 @@ export function PorteriaLogScreen() {
   function handleRefresh() {
     setRefreshing(true);
     const fetches = [getMyPackages().then(setPackages).catch(() => {})];
-    if (activeTab === 'entries') fetches.push(getMyAccessEntries().then(setEntries).catch(() => {}));
+    if (activeTab === 'entries') fetches.push(getMyAccessEntries(selectedAptId).then(setEntries).catch(() => {}));
     Promise.all(fetches).finally(() => setRefreshing(false));
   }
 
-  useEffect(() => { fetchPackages(); }, []);
+  useEffect(() => {
+    fetchPackages();
+    getMyApartments().then(setApartments).catch(() => {});
+  }, []);
 
   useEffect(() => {
-    if (activeTab === 'entries') fetchEntries();
-  }, [activeTab]);
+    if (activeTab === 'entries') fetchEntries(selectedAptId);
+  }, [activeTab, selectedAptId]);
 
   const pendingPackages = packages.filter((p) => !p.delivered);
 
@@ -239,6 +248,26 @@ export function PorteriaLogScreen() {
             <View style={styles.visitorsHeader}>
               <Text style={styles.visitorsTitle}>Ingresos recientes</Text>
             </View>
+
+            {apartments.length > 1 && (
+              <View style={styles.aptSelector}>
+                {apartments.map((apt, idx) => {
+                  const label = apt.apartment
+                    ? `${apt.apartment.towerData?.name ?? 'Torre'} · ${apt.apartment.number}`
+                    : `Apt. ${idx + 1}`;
+                  return (
+                    <Pressable
+                      key={apt.apartmentId}
+                      onPress={() => setSelectedAptIdx(idx)}
+                      style={[styles.aptChip, idx === selectedAptIdx && styles.aptChipActive]}>
+                      <Text style={[styles.aptChipText, idx === selectedAptIdx && styles.aptChipTextActive]}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
             {loadingEntries ? (
               [0, 1, 2].map((i) => <View key={i} style={[styles.skeleton, { height: 80 }]} />)
@@ -484,6 +513,29 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-end',
     marginBottom: 4,
+  },
+  aptSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  aptChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: noirTheme.surfaceLow,
+  },
+  aptChipActive: {
+    backgroundColor: noirTheme.primary,
+  },
+  aptChipText: {
+    color: noirTheme.secondary,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  aptChipTextActive: {
+    color: '#000000',
   },
   visitorsTitle: {
     color: noirTheme.primary,
