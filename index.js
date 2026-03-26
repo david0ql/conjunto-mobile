@@ -2,8 +2,16 @@
  * @format
  */
 
-import { AppRegistry } from 'react-native';
-import App from './App';
-import { name as appName } from './app.json';
+import { Navigation } from 'react-native-navigation';
+import { registerScreens } from './src/navigation/registerScreens';
+import {
+  setDefaultNavigationOptions,
+  setSplashRoot,
+} from './src/navigation/root';
 
-AppRegistry.registerComponent(appName, () => App);
+registerScreens();
+
+Navigation.events().registerAppLaunchedListener(() => {
+  setDefaultNavigationOptions();
+  setSplashRoot();
+});
