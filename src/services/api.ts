@@ -240,8 +240,8 @@ export async function getMyApartments(): Promise<ResidentApartment[]> {
   return request<ResidentApartment[]>('GET', '/residents/me/apartments');
 }
 
-export async function getMyQr(): Promise<{ dataUrl: string; residentId: string }> {
-  return request<{ dataUrl: string; residentId: string }>('GET', '/residents/me/qr');
+export async function getMyQr(apartmentId: string): Promise<{ dataUrl: string; residentId: string; apartmentId: string }> {
+  return request<{ dataUrl: string; residentId: string; apartmentId: string }>('GET', `/residents/me/qr?apartmentId=${apartmentId}`);
 }
 
 // ─── Image URL helper ─────────────────────────────────────────────────────────

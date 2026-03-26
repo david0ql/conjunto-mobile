@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ImageBackground,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,20 +25,24 @@ import { authStore } from '../context/auth.store';
 export function HomeNewsScreen({ componentId }: NavigationComponentProps) {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const user = authStore.getUser();
 
-  useEffect(() => {
+  function fetchNews(isRefresh = false) {
+    if (isRefresh) setRefreshing(true);
     getNews()
       .then((items) => setNews(items.slice(0, 10)))
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { setLoading(false); setRefreshing(false); });
+  }
+
+  useEffect(() => { fetchNews(); }, []);
 
   const recent = news.slice(0, 3);
   const community = news.slice(0, 10);
 
   return (
-    <NoirScreen>
+    <NoirScreen onRefresh={() => fetchNews(true)} refreshing={refreshing}>
       <NoirTopBar />
 
       <View style={styles.content}>
@@ -75,17 +80,20 @@ export function HomeNewsScreen({ componentId }: NavigationComponentProps) {
               {recent.map((item) => {
                 const imgUri = resolveImageUrl(item.imageUrl);
                 return (
-                  <ImageBackground
+                  <Pressable
                     key={item.id}
-                    source={imgUri ? { uri: imgUri } : undefined}
-                    style={styles.recentCard}
-                    imageStyle={styles.cardImage}>
-                    <View style={styles.cardOverlay} />
-                    <View style={styles.recentCardContent}>
-                      <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
-                      <Text style={styles.recentTitle}>{item.title}</Text>
-                    </View>
-                  </ImageBackground>
+                    onPress={() => pushScreen(componentId, COMPONENTS.newsDetail, { newsId: item.id })}>
+                    <ImageBackground
+                      source={imgUri ? { uri: imgUri } : require('../assets/news-placeholder.png')}
+                      style={styles.recentCard}
+                      imageStyle={styles.cardImage}>
+                      <View style={styles.cardOverlay} />
+                      <View style={styles.recentCardContent}>
+                        <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
+                        <Text style={styles.recentTitle}>{item.title}</Text>
+                      </View>
+                    </ImageBackground>
+                  </Pressable>
                 );
               })}
             </ScrollView>

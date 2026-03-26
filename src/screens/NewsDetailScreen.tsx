@@ -13,18 +13,22 @@ interface Props extends NavigationComponentProps {
 export function NewsDetailScreen({ componentId, newsId }: Props) {
   const [news, setNews] = useState<NewsItem | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
+  function fetchNews(isRefresh = false) {
+    if (isRefresh) setRefreshing(true);
     getNewsItem(newsId)
       .then(setNews)
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [newsId]);
+      .finally(() => { setLoading(false); setRefreshing(false); });
+  }
+
+  useEffect(() => { fetchNews(); }, [newsId]);
 
   const imageUrl = resolveImageUrl(news?.imageUrl);
 
   return (
-    <NoirScreen>
+    <NoirScreen onRefresh={() => fetchNews(true)} refreshing={refreshing}>
       <NoirTopBar
         leftIcon="arrow-back"
         onLeftPress={() => popScreen(componentId)}

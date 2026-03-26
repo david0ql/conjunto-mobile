@@ -35,7 +35,7 @@ export function SplashScreen() {
   return (
     <NoirScreen scroll={false} contentContainerStyle={styles.container}>
       <View style={styles.center}>
-        <Text style={styles.brand}>MONOLITH</Text>
+        <Text style={styles.brand}>RESERVA{'\n'}DE LA LOMA</Text>
         <Text style={styles.subtitle}>Establishing Connection</Text>
       </View>
 

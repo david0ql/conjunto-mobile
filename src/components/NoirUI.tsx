@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ImageBackground,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleProp,
   StyleSheet,
@@ -18,6 +19,8 @@ type ScreenProps = {
   children: React.ReactNode;
   scroll?: boolean;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 };
 
 type TopBarProps = {
@@ -38,11 +41,23 @@ export function NoirScreen({
   children,
   scroll = true,
   contentContainerStyle,
+  onRefresh,
+  refreshing = false,
 }: ScreenProps) {
   const content = scroll ? (
     <ScrollView
       contentContainerStyle={[styles.scrollContent, contentContainerStyle]}
-      showsVerticalScrollIndicator={false}>
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={noirTheme.primary}
+            colors={[noirTheme.primary]}
+          />
+        ) : undefined
+      }>
       {children}
     </ScrollView>
   ) : (
@@ -53,7 +68,7 @@ export function NoirScreen({
 }
 
 export function NoirTopBar({
-  title = 'MONOLITH',
+  title = 'RESERVA DE LA LOMA',
   leftIcon,
   onLeftPress,
 }: TopBarProps) {

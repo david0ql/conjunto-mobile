@@ -62,7 +62,7 @@ export function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.container}>
         <View style={styles.heroCard}>
-          <Text style={styles.sideBrand}>MONOLITH</Text>
+          <Text style={styles.sideBrand}>RESERVA DE LA LOMA</Text>
           <View style={styles.sideTextGroup}>
             <Text style={styles.sideHeadline}>EL SILENCIO DEL LUJO.</Text>
             <Text style={styles.sideCopy}>

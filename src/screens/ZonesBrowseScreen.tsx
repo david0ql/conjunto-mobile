@@ -43,29 +43,41 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loadingAreas, setLoadingAreas] = useState(true);
   const [loadingReservations, setLoadingReservations] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
+  function fetchAreas() {
     getCommonAreas()
       .then(setAreas)
       .catch(() => {})
       .finally(() => setLoadingAreas(false));
-  }, []);
+  }
+
+  function fetchReservations() {
+    setLoadingReservations(true);
+    getMyReservations()
+      .then(setReservations)
+      .catch(() => {})
+      .finally(() => setLoadingReservations(false));
+  }
+
+  function handleRefresh() {
+    setRefreshing(true);
+    const fetches = [getCommonAreas().then(setAreas).catch(() => {})];
+    if (activeTab === 'historial') fetches.push(getMyReservations().then(setReservations).catch(() => {}));
+    Promise.all(fetches).finally(() => setRefreshing(false));
+  }
+
+  useEffect(() => { fetchAreas(); }, []);
 
   useEffect(() => {
-    if (activeTab === 'historial') {
-      setLoadingReservations(true);
-      getMyReservations()
-        .then(setReservations)
-        .catch(() => {})
-        .finally(() => setLoadingReservations(false));
-    }
+    if (activeTab === 'historial') fetchReservations();
   }, [activeTab]);
 
   const statusColors = (statusCode?: string) =>
     STATUS_COLORS[statusCode ?? ''] ?? { bg: noirTheme.surfaceHigh, text: noirTheme.secondary };
 
   return (
-    <NoirScreen>
+    <NoirScreen onRefresh={handleRefresh} refreshing={refreshing}>
       <NoirTopBar />
 
       <View style={styles.content}>
@@ -122,7 +134,7 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
                     label={area.maxCapacity ? `Capacidad: ${area.maxCapacity} personas` : 'Disponible'}
                     subtitle={area.name}
                     onPrimaryPress={() =>
-                      pushScreen(componentId, COMPONENTS.createReservation, { areaId: area.id, areaName: area.name })
+                      pushScreen(componentId, COMPONENTS.createReservation, { areaId: area.id, areaName: area.name }, true)
                     }
                     onSecondaryPress={() =>
                       pushScreen(componentId, COMPONENTS.zoneDetail)

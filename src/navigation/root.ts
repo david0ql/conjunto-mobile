@@ -200,12 +200,20 @@ export function setShellRoot(name: ComponentName) {
   return Navigation.setRoot(buildMainTabsRoot(selectedTab) as any);
 }
 
-export function pushScreen(componentId: string, name: ComponentName, passProps?: Record<string, unknown>) {
+export function pushScreen(
+  componentId: string,
+  name: ComponentName,
+  passProps?: Record<string, unknown>,
+  hideBottomTabs = false,
+) {
   return Navigation.push(componentId, {
     component: {
       name,
       passProps,
-      options: defaultComponentOptions,
+      options: {
+        ...defaultComponentOptions,
+        ...(hideBottomTabs ? { bottomTabs: { visible: false } } : {}),
+      },
     },
   });
 }

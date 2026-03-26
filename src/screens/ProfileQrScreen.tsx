@@ -25,17 +25,30 @@ export function ProfileQrScreen() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [selectedAptIdx, setSelectedAptIdx] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    Promise.all([getMyProfile(), getMyApartments(), getMyQr()])
-      .then(([p, apts, qr]) => {
+  function fetchProfile(isRefresh = false) {
+    if (isRefresh) setRefreshing(true);
+    Promise.all([getMyProfile(), getMyApartments()])
+      .then(([p, apts]) => {
         setProfile(p);
         setApartments(apts);
-        setQrDataUrl(qr.dataUrl);
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { setLoading(false); setRefreshing(false); });
+  }
+
+  useEffect(() => { fetchProfile(); }, []);
+
+  // Fetch QR whenever selected apartment changes
+  useEffect(() => {
+    const apt = apartments[selectedAptIdx];
+    if (!apt) return;
+    setQrDataUrl(null);
+    getMyQr(apt.apartmentId)
+      .then((r) => setQrDataUrl(r.dataUrl))
+      .catch(() => {});
+  }, [apartments, selectedAptIdx]);
 
   async function handleLogout() {
     await authStore.clearSession();
@@ -57,7 +70,7 @@ export function ProfileQrScreen() {
   ] as const;
 
   return (
-    <NoirScreen>
+    <NoirScreen onRefresh={() => fetchProfile(true)} refreshing={refreshing}>
       <NoirTopBar />
 
       <View style={styles.content}>
@@ -132,7 +145,7 @@ export function ProfileQrScreen() {
         />
 
         <View style={styles.footer}>
-          <Text style={styles.footerTitle}>MONOLITH RESIDENTIAL SYSTEMS</Text>
+          <Text style={styles.footerTitle}>RESERVA DE LA LOMA — SISTEMAS RESIDENCIALES</Text>
           <Text style={styles.footerMeta}>ENCRYPTED BIOMETRIC PROTOCOL v4.2.0</Text>
         </View>
       </View>

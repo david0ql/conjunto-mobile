@@ -114,29 +114,41 @@ export function PorteriaLogScreen() {
   const [entries, setEntries] = useState<AccessEntry[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedPkg, setSelectedPkg] = useState<PackageItem | null>(null);
 
-  useEffect(() => {
+  function fetchPackages() {
     getMyPackages()
       .then(setPackages)
       .catch(() => {})
       .finally(() => setLoadingPackages(false));
-  }, []);
+  }
+
+  function fetchEntries() {
+    setLoadingEntries(true);
+    getMyAccessEntries()
+      .then(setEntries)
+      .catch(() => {})
+      .finally(() => setLoadingEntries(false));
+  }
+
+  function handleRefresh() {
+    setRefreshing(true);
+    const fetches = [getMyPackages().then(setPackages).catch(() => {})];
+    if (activeTab === 'entries') fetches.push(getMyAccessEntries().then(setEntries).catch(() => {}));
+    Promise.all(fetches).finally(() => setRefreshing(false));
+  }
+
+  useEffect(() => { fetchPackages(); }, []);
 
   useEffect(() => {
-    if (activeTab === 'entries') {
-      setLoadingEntries(true);
-      getMyAccessEntries()
-        .then(setEntries)
-        .catch(() => {})
-        .finally(() => setLoadingEntries(false));
-    }
+    if (activeTab === 'entries') fetchEntries();
   }, [activeTab]);
 
   const pendingPackages = packages.filter((p) => !p.delivered);
 
   return (
-    <NoirScreen>
+    <NoirScreen onRefresh={handleRefresh} refreshing={refreshing}>
       <NoirTopBar />
 
       <PackagePhotosModal pkg={selectedPkg} onClose={() => setSelectedPkg(null)} />

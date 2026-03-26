@@ -47,10 +47,17 @@ export function CreateReservationScreen({ componentId, areaId, areaName }: Props
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [statuses, setStatuses] = useState<ReservationStatus[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    getReservationStatuses().then(setStatuses).catch(() => {});
-  }, []);
+  function fetchStatuses(isRefresh = false) {
+    if (isRefresh) setRefreshing(true);
+    getReservationStatuses()
+      .then(setStatuses)
+      .catch(() => {})
+      .finally(() => setRefreshing(false));
+  }
+
+  useEffect(() => { fetchStatuses(); }, []);
 
   async function handleConfirm() {
     if (!areaId) {
@@ -97,7 +104,7 @@ export function CreateReservationScreen({ componentId, areaId, areaName }: Props
   }
 
   return (
-    <NoirScreen>
+    <NoirScreen onRefresh={() => fetchStatuses(true)} refreshing={refreshing}>
       <NoirTopBar
         onLeftPress={() => popScreen(componentId)}
         leftIcon="arrow-back"
@@ -173,7 +180,7 @@ export function CreateReservationScreen({ componentId, areaId, areaName }: Props
           <MaterialIcons color={noirTheme.primary} name="info-outline" size={18} />
           <Text style={styles.noticeText}>
             Al confirmar esta reserva, usted acepta las políticas de uso del
-            espacio y las normas de convivencia de MONOLITH.
+            espacio y las normas de convivencia de Reserva de la Loma.
           </Text>
         </View>
 
