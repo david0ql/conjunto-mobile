@@ -14,8 +14,10 @@ import { NavigationComponentProps } from 'react-native-navigation';
 import { noirTheme } from '../design/theme';
 import {
   getCommonAreas,
+  getCommunitySpaces,
   getMyReservations,
   type CommonArea,
+  type CommunitySpace,
   type Reservation,
 } from '../services/api';
 
@@ -40,8 +42,10 @@ type SpacesTab = 'reservables' | 'comunes' | 'historial';
 export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
   const [activeTab, setActiveTab] = useState<SpacesTab>('reservables');
   const [areas, setAreas] = useState<CommonArea[]>([]);
+  const [communitySpaces, setCommunitySpaces] = useState<CommunitySpace[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loadingAreas, setLoadingAreas] = useState(true);
+  const [loadingComunes, setLoadingComunes] = useState(false);
   const [loadingReservations, setLoadingReservations] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -50,6 +54,14 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
       .then(setAreas)
       .catch(() => {})
       .finally(() => setLoadingAreas(false));
+  }
+
+  function fetchComunes() {
+    setLoadingComunes(true);
+    getCommunitySpaces()
+      .then(setCommunitySpaces)
+      .catch(() => {})
+      .finally(() => setLoadingComunes(false));
   }
 
   function fetchReservations() {
@@ -62,12 +74,15 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
 
   function handleRefresh() {
     setRefreshing(true);
-    const fetches = [getCommonAreas().then(setAreas).catch(() => {})];
+    const fetches: Promise<unknown>[] = [
+      getCommonAreas().then(setAreas).catch(() => {}),
+      getCommunitySpaces().then(setCommunitySpaces).catch(() => {}),
+    ];
     if (activeTab === 'historial') fetches.push(getMyReservations().then(setReservations).catch(() => {}));
     Promise.all(fetches).finally(() => setRefreshing(false));
   }
 
-  useEffect(() => { fetchAreas(); }, []);
+  useEffect(() => { fetchAreas(); fetchComunes(); }, []);
 
   useEffect(() => {
     if (activeTab === 'historial') fetchReservations();
@@ -148,26 +163,28 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
 
         {activeTab === 'comunes' ? (
           <View style={styles.sectionList}>
-            {loadingAreas ? (
+            {loadingComunes ? (
               [0, 1, 2].map((i) => <View key={i} style={styles.skeleton} />)
+            ) : communitySpaces.length === 0 ? (
+              <Text style={styles.emptyText}>No hay zonas comunes registradas.</Text>
             ) : (
-              areas.map((area) => (
-                <View key={area.id} style={styles.commonCard}>
+              communitySpaces.map((space) => (
+                <View key={space.id} style={styles.commonCard}>
                   <View style={styles.commonTop}>
                     <View style={styles.commonIconWrap}>
                       <MaterialIcons
                         color={noirTheme.primary}
-                        name={ZONE_ICONS[area.name] ?? 'place'}
+                        name={ZONE_ICONS[space.name] ?? 'place'}
                         size={22}
                       />
                     </View>
-                    <Text style={styles.commonStatus}>
-                      {area.maxCapacity ? `Máx. ${area.maxCapacity}` : 'Libre'}
-                    </Text>
+                    <Text style={styles.commonStatus}>{space.phase}</Text>
                   </View>
                   <View style={styles.commonCopy}>
-                    <Text style={styles.commonTitle}>{area.name}</Text>
-                    <Text style={styles.commonBody}>Espacio disponible para residentes del conjunto.</Text>
+                    <Text style={styles.commonTitle}>{space.name}</Text>
+                    {space.description ? (
+                      <Text style={styles.commonBody}>{space.description}</Text>
+                    ) : null}
                   </View>
                 </View>
               ))

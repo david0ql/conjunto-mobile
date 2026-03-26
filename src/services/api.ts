@@ -80,6 +80,15 @@ export interface PackageItem {
   apartment?: { number: string; towerData?: { name: string } };
 }
 
+export interface CommunitySpace {
+  id: string;
+  name: string;
+  phase: string;
+  description?: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface AccessEntry {
   id: string;
   entryTime: string;
@@ -222,6 +231,12 @@ export async function getMyPackages(): Promise<PackageItem[]> {
 
 export async function getPackagePhotos(packageId: string): Promise<PackagePhoto[]> {
   return request<PackagePhoto[]>('GET', `/packages/${packageId}/photos`);
+}
+
+// ─── Community Spaces ─────────────────────────────────────────────────────────
+
+export async function getCommunitySpaces(): Promise<CommunitySpace[]> {
+  return request<CommunitySpace[]>('GET', '/community-spaces');
 }
 
 // ─── Access Audit ─────────────────────────────────────────────────────────────
