@@ -122,6 +122,7 @@ export function PorteriaLogScreen() {
   const [entries, setEntries] = useState<AccessEntry[]>([]);
   const [apartments, setApartments] = useState<ResidentApartment[]>([]);
   const [loadingPorters, setLoadingPorters] = useState(true);
+  const [portersError, setPortersError] = useState<string | null>(null);
   const [selectedAptIdx, setSelectedAptIdx] = useState(0);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
@@ -139,8 +140,17 @@ export function PorteriaLogScreen() {
 
   function fetchPorters() {
     setLoadingPorters(true);
+    setPortersError(null);
     callService.refreshPorters()
-      .then(setPorters)
+      .then((nextPorters) => {
+        setPorters(nextPorters);
+        setPortersError(null);
+      })
+      .catch((error) => {
+        setPortersError(
+          error instanceof Error ? error.message : 'No fue posible cargar la lista de porteros.',
+        );
+      })
       .finally(() => setLoadingPorters(false));
   }
 
@@ -156,7 +166,16 @@ export function PorteriaLogScreen() {
     setRefreshing(true);
     const fetches = [
       getMyPackages().then(setPackages).catch(() => {}),
-      callService.refreshPorters().then(setPorters),
+      callService.refreshPorters()
+        .then((nextPorters) => {
+          setPorters(nextPorters);
+          setPortersError(null);
+        })
+        .catch((error) => {
+          setPortersError(
+            error instanceof Error ? error.message : 'No fue posible cargar la lista de porteros.',
+          );
+        }),
     ];
     if (activeTab === 'entries') fetches.push(getMyAccessEntries(selectedAptId).then(setEntries).catch(() => {}));
     Promise.all(fetches).finally(() => setRefreshing(false));
@@ -165,6 +184,7 @@ export function PorteriaLogScreen() {
   useEffect(() => {
     const unsubscribe = callService.subscribePorters((nextPorters) => {
       setPorters(nextPorters);
+      setPortersError(null);
       setLoadingPorters(false);
     });
 
@@ -210,6 +230,11 @@ export function PorteriaLogScreen() {
 
           {loadingPorters ? (
             <View style={[styles.skeleton, styles.callSkeleton]} />
+          ) : portersError ? (
+            <View style={styles.callErrorBox}>
+              <Text style={styles.callErrorTitle}>No fue posible cargar portería</Text>
+              <Text style={styles.callErrorText}>{portersError}</Text>
+            </View>
           ) : porters.length === 0 ? (
             <Text style={styles.callCardEmpty}>No hay porteros activos disponibles en este momento.</Text>
           ) : (
@@ -500,6 +525,26 @@ const styles = StyleSheet.create({
     color: noirTheme.secondary,
     fontSize: 13,
     lineHeight: 20,
+  },
+  callErrorBox: {
+    borderWidth: 1,
+    borderColor: '#3b1d1d',
+    backgroundColor: '#161010',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  callErrorTitle: {
+    color: noirTheme.primary,
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  callErrorText: {
+    color: noirTheme.secondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
   callSkeleton: {
     height: 132,

@@ -78,7 +78,7 @@ class CallService {
       void this.ensureModal();
     });
 
-    void this.refreshPorters();
+    void this.refreshPorters().catch(() => undefined);
   }
 
   stop() {
@@ -115,9 +115,9 @@ class CallService {
       const porters = await getCallPorters();
       this.setPorters(porters);
       return porters;
-    } catch {
+    } catch (error) {
       this.setPorters([]);
-      return [];
+      throw error;
     }
   }
 
