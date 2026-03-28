@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io, type Socket } from 'socket.io-client';
+import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import { REALTIME_URL, getActiveAssembly, getMyToken, syncVotes } from '../../services/api';
 import { assemblyStore } from './assemblyStore';
 import type {
@@ -7,6 +8,7 @@ import type {
   AssemblyQuestion,
   OfflineVote,
   VoteStatsPayload,
+  VoteSyncStatus,
 } from './types';
 
 const VOTES_KEY = (assemblyId: string) => `assembly.offline_votes.${assemblyId}`;
@@ -18,6 +20,7 @@ class AssemblyService {
   private activeToken: string | null = null;
   private residentToken: string | null = null;
   private currentAssemblyId: string | null = null;
+  private appStateSubscription: NativeEventSubscription | null = null;
 
   start(token: string) {
     if (this.socket && this.activeToken === token) {
@@ -25,6 +28,7 @@ class AssemblyService {
     }
     this.stop();
     this.activeToken = token;
+    this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
 
     this.socket = io(REALTIME_URL, {
       auth: { token },
@@ -79,7 +83,7 @@ class AssemblyService {
     });
 
     this.socket.on('assembly:started', (payload: AssemblyPayload) => {
-      assemblyStore.patch({ assembly: payload, phase: 'active' });
+      void this.handleAssemblyStarted(payload);
     });
 
     this.socket.on('assembly:finished', () => {
@@ -93,6 +97,8 @@ class AssemblyService {
     this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
+    this.appStateSubscription?.remove();
+    this.appStateSubscription = null;
     this.activeToken = null;
     this.residentToken = null;
     this.currentAssemblyId = null;
@@ -127,39 +133,7 @@ class AssemblyService {
         return;
       }
 
-      this.currentAssemblyId = assembly.id;
-      await this.cacheAssembly(assembly);
-
-      const tokenData = await getMyToken(assembly.id);
-      this.residentToken = tokenData.token;
-      await AsyncStorage.setItem(TOKEN_KEY(assembly.id), tokenData.token);
-
-      const activeQuestion = assembly.questions.find((q) => q.status === 'active') ?? null;
-
-      const storedVotes = await this.getOfflineVotes(assembly.id);
-      const myVotes: Record<string, 'yes' | 'no' | 'blank'> = {};
-      const syncStatuses: Record<string, string> = {};
-      const rejectedReasons: Record<string, string> = {};
-
-      for (const v of storedVotes) {
-        myVotes[v.questionId] = v.vote;
-        syncStatuses[v.questionId] = v.syncStatus;
-        if (v.rejectedReason) rejectedReasons[v.questionId] = v.rejectedReason;
-      }
-
-      assemblyStore.patch({
-        assembly,
-        currentQuestion: activeQuestion,
-        phase: 'active',
-        myVotes: myVotes as Record<string, 'yes' | 'no' | 'blank'>,
-        syncStatuses: syncStatuses as Record<string, any>,
-        rejectedReasons,
-      });
-
-      if (this.socket?.connected) {
-        this.socket.emit('assembly:join', { assemblyId: assembly.id });
-        await this.syncPendingVotes(assembly.id);
-      }
+      await this.bootstrapAssembly(assembly);
     } catch {
       const cached = await this.getCachedAssembly();
       if (cached) {
@@ -313,6 +287,72 @@ class AssemblyService {
       return raw ? (JSON.parse(raw) as AssemblyPayload) : null;
     } catch {
       return null;
+    }
+  }
+
+  private handleAppStateChange = (nextState: AppStateStatus) => {
+    if (nextState === 'active') {
+      void this.loadActiveAssembly();
+    }
+  };
+
+  private async handleAssemblyStarted(assembly: AssemblyPayload) {
+    try {
+      await this.bootstrapAssembly(assembly);
+    } catch {
+      assemblyStore.patch({
+        assembly,
+        currentQuestion: assembly.questions.find((q) => q.status === 'active') ?? null,
+        stats: null,
+        phase: 'active',
+        myVotes: {},
+        syncStatuses: {},
+        rejectedReasons: {},
+        error: null,
+      });
+    }
+  }
+
+  private async bootstrapAssembly(assembly: AssemblyPayload) {
+    this.currentAssemblyId = assembly.id;
+    await this.cacheAssembly(assembly);
+
+    const tokenData = await getMyToken(assembly.id);
+    this.residentToken = tokenData.token;
+    await AsyncStorage.setItem(TOKEN_KEY(assembly.id), tokenData.token);
+
+    const activeQuestion = assembly.questions.find((q) => q.status === 'active') ?? null;
+    const storedVotes = await this.getOfflineVotes(assembly.id);
+    const myVotes: Record<string, 'yes' | 'no' | 'blank'> = {};
+    const syncStatuses: Record<string, VoteSyncStatus> = {};
+    const rejectedReasons: Record<string, string> = {};
+
+    for (const vote of storedVotes) {
+      myVotes[vote.questionId] = vote.vote;
+      syncStatuses[vote.questionId] = vote.syncStatus;
+      if (vote.rejectedReason) rejectedReasons[vote.questionId] = vote.rejectedReason;
+    }
+
+    assemblyStore.patch({
+      assembly,
+      currentQuestion: activeQuestion,
+      stats: activeQuestion
+        ? {
+            assemblyId: assembly.id,
+            questionId: activeQuestion.id,
+            ...activeQuestion.stats,
+          }
+        : null,
+      phase: 'active',
+      myVotes,
+      syncStatuses,
+      rejectedReasons,
+      error: null,
+    });
+
+    if (this.socket?.connected) {
+      this.socket.emit('assembly:join', { assemblyId: assembly.id });
+      await this.syncPendingVotes(assembly.id);
     }
   }
 }
