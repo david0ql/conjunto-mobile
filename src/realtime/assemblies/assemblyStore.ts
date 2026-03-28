@@ -12,6 +12,8 @@ export interface AssemblyVoteState {
   myVotes: Record<string, 'yes' | 'no' | 'blank'>;
   syncStatuses: Record<string, VoteSyncStatus>;
   rejectedReasons: Record<string, string>;
+  verificationCode: string | null;
+  verificationAssemblyTitle: string | null;
   phase: 'idle' | 'loading' | 'active' | 'finished' | 'error';
   isOnline: boolean;
   error: string | null;
@@ -26,6 +28,8 @@ const initialState: AssemblyVoteState = {
   myVotes: {},
   syncStatuses: {},
   rejectedReasons: {},
+  verificationCode: null,
+  verificationAssemblyTitle: null,
   phase: 'idle',
   isOnline: true,
   error: null,

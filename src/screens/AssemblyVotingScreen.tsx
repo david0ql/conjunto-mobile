@@ -32,6 +32,27 @@ const VOTE_COLORS = {
   blank: { bg: '#1c1917', border: '#78716c', label: '#d6d3d1' },
 };
 
+function VerificationCodeCard({
+  code,
+  assemblyTitle,
+  title,
+}: {
+  code: string;
+  assemblyTitle: string | null;
+  title: string;
+}) {
+  return (
+    <View style={styles.verificationCard}>
+      <Text style={styles.verificationLabel}>{title}</Text>
+      <Text style={styles.verificationCode}>{code}</Text>
+      <Text style={styles.verificationHelp}>
+        {assemblyTitle ? `${assemblyTitle}. ` : ''}
+        Úsalo en la web pública para verificar que tu voto quedó registrado correctamente.
+      </Text>
+    </View>
+  );
+}
+
 export function AssemblyVotingScreen({ componentId: _componentId }: NavigationComponentProps) {
   const state = useSyncExternalStore(assemblyStore.subscribe, assemblyStore.getState);
 
@@ -55,29 +76,26 @@ export function AssemblyVotingScreen({ componentId: _componentId }: NavigationCo
     );
   }
 
-  if (state.phase === 'idle' || !state.assembly) {
+  if (state.phase === 'idle' || state.phase === 'finished' || !state.assembly) {
     return (
       <NoirScreen scroll={false}>
         <NoirTopBar title="Asamblea" />
-        <View style={styles.centered}>
-          <Text style={styles.emoji}>🗳️</Text>
-          <Text style={styles.title}>Sin asamblea activa</Text>
-          <Text style={styles.subtitle}>
-            Cuando el administrador inicie una asamblea aparecerá aquí.
-          </Text>
-        </View>
-      </NoirScreen>
-    );
-  }
+        <View style={styles.waitingScreen}>
+          <View style={styles.waitingHero}>
+            <Text style={styles.emoji}>🗳️</Text>
+            <Text style={styles.title}>Sin asamblea activa</Text>
+            <Text style={styles.subtitle}>
+              Cuando el administrador inicie una asamblea aparecerá aquí.
+            </Text>
+          </View>
 
-  if (state.phase === 'finished') {
-    return (
-      <NoirScreen scroll={false}>
-        <NoirTopBar title="Asamblea" />
-        <View style={styles.centered}>
-          <Text style={styles.emoji}>✅</Text>
-          <Text style={styles.title}>Asamblea finalizada</Text>
-          <Text style={styles.subtitle}>{state.assembly.title}</Text>
+          {state.verificationCode && (
+            <VerificationCodeCard
+              code={state.verificationCode}
+              assemblyTitle={state.verificationAssemblyTitle}
+              title="Último código de verificación"
+            />
+          )}
         </View>
       </NoirScreen>
     );
@@ -98,6 +116,14 @@ export function AssemblyVotingScreen({ componentId: _componentId }: NavigationCo
           <Text style={styles.assemblyTitle}>{state.assembly.title}</Text>
           <View style={[styles.onlineDot, { backgroundColor: state.isOnline ? '#22c55e' : '#ef4444' }]} />
         </View>
+
+        {state.verificationCode && (
+          <VerificationCodeCard
+            code={state.verificationCode}
+            assemblyTitle={state.verificationAssemblyTitle}
+            title="Código de verificación"
+          />
+        )}
 
         {!question && (
           <View style={styles.centered}>
@@ -198,6 +224,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
   },
+  waitingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+    gap: 24,
+  },
+  waitingHero: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
   centered: {
     flex: 1,
     alignItems: 'center',
@@ -237,6 +276,32 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
+  },
+  verificationCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: noirTheme.surfaceLow,
+    padding: 16,
+    gap: 8,
+  },
+  verificationLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    color: noirTheme.secondary,
+    textTransform: 'uppercase',
+  },
+  verificationCode: {
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 2.4,
+    color: noirTheme.primary,
+  },
+  verificationHelp: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: noirTheme.secondary,
   },
   waiting: {
     fontSize: 15,

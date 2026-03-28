@@ -47,6 +47,8 @@ class AssemblyService {
         // Refresca estado completo desde REST por si cambió la pregunta mientras offline
         void this.refreshAssemblyState(this.currentAssemblyId);
         void this.syncPendingVotes(this.currentAssemblyId);
+      } else {
+        void this.syncPendingVotesForStoredAssemblies();
       }
     });
 
@@ -74,11 +76,14 @@ class AssemblyService {
     });
 
     this.socket.on('assembly:vote_confirmed', (event: { questionId: string; vote: string; token: string }) => {
+      const current = assemblyStore.getState();
       assemblyStore.patch({
         syncStatuses: {
-          ...assemblyStore.getState().syncStatuses,
+          ...current.syncStatuses,
           [event.questionId]: 'synced',
         },
+        verificationCode: event.token ? this.formatVerificationCode(event.token) : current.verificationCode,
+        verificationAssemblyTitle: current.assembly?.title ?? current.verificationAssemblyTitle,
       });
     });
 
@@ -86,8 +91,8 @@ class AssemblyService {
       void this.handleAssemblyStarted(payload);
     });
 
-    this.socket.on('assembly:finished', () => {
-      assemblyStore.patch({ phase: 'finished' });
+    this.socket.on('assembly:finished', (payload?: AssemblyPayload) => {
+      void this.handleAssemblyFinished(payload);
     });
 
     void this.loadActiveAssembly();
@@ -108,7 +113,10 @@ class AssemblyService {
   private async refreshAssemblyState(assemblyId: string) {
     try {
       const assembly = await getActiveAssembly();
-      if (!assembly || assembly.id !== assemblyId) return;
+      if (!assembly || assembly.id !== assemblyId) {
+        await this.clearActiveAssemblyState();
+        return;
+      }
 
       await this.cacheAssembly(assembly);
       const activeQuestion = assembly.questions.find((q) => q.status === 'active') ?? null;
@@ -120,26 +128,42 @@ class AssemblyService {
   }
 
   async loadActiveAssembly() {
-    assemblyStore.patch({ phase: 'loading' });
+    assemblyStore.patch({ phase: 'loading', error: null });
     try {
       const assembly = await getActiveAssembly();
       if (!assembly) {
-        const cached = await this.getCachedAssembly();
-        if (cached) {
-          assemblyStore.patch({ assembly: cached, phase: 'active' });
-        } else {
-          assemblyStore.patch({ phase: 'idle' });
-        }
+        await this.syncPendingVotesForStoredAssemblies();
+        await this.clearActiveAssemblyState();
         return;
       }
 
       await this.bootstrapAssembly(assembly);
     } catch {
-      const cached = await this.getCachedAssembly();
+      const cached = await this.getCachedAssembly(this.currentAssemblyId ?? assemblyStore.getState().assembly?.id ?? null);
       if (cached) {
-        assemblyStore.patch({ assembly: cached, phase: 'active', isOnline: false });
+        this.currentAssemblyId = cached.id;
+        this.residentToken = (await AsyncStorage.getItem(TOKEN_KEY(cached.id))) ?? null;
+        const activeQuestion = cached.questions.find((q) => q.status === 'active') ?? null;
+        const verificationCode = this.residentToken ? this.formatVerificationCode(this.residentToken) : null;
+
+        assemblyStore.patch({
+          assembly: cached,
+          currentQuestion: activeQuestion,
+          stats: activeQuestion
+            ? {
+                assemblyId: cached.id,
+                questionId: activeQuestion.id,
+                ...activeQuestion.stats,
+              }
+            : null,
+          phase: 'active',
+          isOnline: false,
+          verificationCode,
+          verificationAssemblyTitle: verificationCode ? cached.title : null,
+        });
       } else {
-        assemblyStore.patch({ phase: 'idle' });
+        await this.clearActiveAssemblyState();
+        assemblyStore.patch({ isOnline: false });
       }
     }
   }
@@ -231,7 +255,11 @@ class AssemblyService {
 
       await AsyncStorage.setItem(VOTES_KEY(assemblyId), JSON.stringify(updatedVotes));
 
-      const newSyncStatuses: Record<string, any> = { ...assemblyStore.getState().syncStatuses };
+      if (assemblyId !== this.currentAssemblyId) {
+        return;
+      }
+
+      const newSyncStatuses: Record<string, VoteSyncStatus> = { ...assemblyStore.getState().syncStatuses };
       const newRejectedReasons: Record<string, string> = { ...assemblyStore.getState().rejectedReasons };
 
       for (const result of results) {
@@ -253,6 +281,9 @@ class AssemblyService {
       v.questionId === questionId ? { ...v, syncStatus: 'synced' as const } : v,
     );
     await AsyncStorage.setItem(VOTES_KEY(assemblyId), JSON.stringify(updated));
+    if (assemblyId !== this.currentAssemblyId) {
+      return;
+    }
     assemblyStore.patch({
       syncStatuses: { ...assemblyStore.getState().syncStatuses, [questionId]: 'synced' },
     });
@@ -278,8 +309,13 @@ class AssemblyService {
     await AsyncStorage.setItem(CACHE_KEY(assembly.id), JSON.stringify(assembly));
   }
 
-  private async getCachedAssembly(): Promise<AssemblyPayload | null> {
+  private async getCachedAssembly(assemblyId?: string | null): Promise<AssemblyPayload | null> {
     try {
+      if (assemblyId) {
+        const raw = await AsyncStorage.getItem(CACHE_KEY(assemblyId));
+        return raw ? (JSON.parse(raw) as AssemblyPayload) : null;
+      }
+
       const keys = await AsyncStorage.getAllKeys();
       const cacheKeys = keys.filter((k) => k.startsWith('assembly.cache.'));
       if (cacheKeys.length === 0) return null;
@@ -308,6 +344,8 @@ class AssemblyService {
         myVotes: {},
         syncStatuses: {},
         rejectedReasons: {},
+        verificationCode: null,
+        verificationAssemblyTitle: null,
         error: null,
       });
     }
@@ -317,9 +355,11 @@ class AssemblyService {
     this.currentAssemblyId = assembly.id;
     await this.cacheAssembly(assembly);
 
-    const tokenData = await getMyToken(assembly.id);
-    this.residentToken = tokenData.token;
-    await AsyncStorage.setItem(TOKEN_KEY(assembly.id), tokenData.token);
+    const tokenData = await this.loadResidentTokenData(assembly.id);
+    this.residentToken = tokenData?.token ?? null;
+    if (tokenData?.token) {
+      await AsyncStorage.setItem(TOKEN_KEY(assembly.id), tokenData.token);
+    }
 
     const activeQuestion = assembly.questions.find((q) => q.status === 'active') ?? null;
     const storedVotes = await this.getOfflineVotes(assembly.id);
@@ -347,6 +387,8 @@ class AssemblyService {
       myVotes,
       syncStatuses,
       rejectedReasons,
+      verificationCode: tokenData?.formatted ?? null,
+      verificationAssemblyTitle: tokenData ? assembly.title : null,
       error: null,
     });
 
@@ -354,6 +396,76 @@ class AssemblyService {
       this.socket.emit('assembly:join', { assemblyId: assembly.id });
       await this.syncPendingVotes(assembly.id);
     }
+  }
+
+  private async handleAssemblyFinished(payload?: AssemblyPayload) {
+    const assemblyId = payload?.id ?? this.currentAssemblyId;
+    if (assemblyId) {
+      await this.syncPendingVotes(assemblyId);
+    }
+    await this.clearActiveAssemblyState();
+  }
+
+  private async clearActiveAssemblyState() {
+    const current = assemblyStore.getState();
+    const assemblyId = this.currentAssemblyId ?? current.assembly?.id ?? null;
+
+    if (assemblyId) {
+      await AsyncStorage.removeItem(CACHE_KEY(assemblyId));
+    }
+
+    this.currentAssemblyId = null;
+    this.residentToken = null;
+
+    assemblyStore.patch({
+      assembly: null,
+      currentQuestion: null,
+      stats: null,
+      myVotes: {},
+      syncStatuses: {},
+      rejectedReasons: {},
+      verificationCode: current.verificationCode,
+      verificationAssemblyTitle: current.verificationAssemblyTitle,
+      phase: 'idle',
+      error: null,
+    });
+  }
+
+  private async syncPendingVotesForStoredAssemblies() {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const voteKeys = keys.filter((key) => key.startsWith('assembly.offline_votes.'));
+
+      for (const key of voteKeys) {
+        const assemblyId = key.replace('assembly.offline_votes.', '');
+        if (assemblyId) {
+          await this.syncPendingVotes(assemblyId);
+        }
+      }
+    } catch {
+      // Keep waiting state intact; pending votes will retry later.
+    }
+  }
+
+  private async loadResidentTokenData(assemblyId: string): Promise<{ token: string; formatted: string } | null> {
+    try {
+      const tokenData = await getMyToken(assemblyId);
+      return tokenData;
+    } catch {
+      const cachedToken = await AsyncStorage.getItem(TOKEN_KEY(assemblyId));
+      if (!cachedToken) {
+        return null;
+      }
+
+      return {
+        token: cachedToken,
+        formatted: this.formatVerificationCode(cachedToken),
+      };
+    }
+  }
+
+  private formatVerificationCode(token: string) {
+    return token.match(/.{1,3}/g)?.join('-') ?? token;
   }
 }
 
