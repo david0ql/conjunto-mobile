@@ -139,7 +139,8 @@ class AssemblyService {
 
       await this.bootstrapAssembly(assembly);
     } catch {
-      const cached = await this.getCachedAssembly(this.currentAssemblyId ?? assemblyStore.getState().assembly?.id ?? null);
+      const fallbackAssemblyId = this.currentAssemblyId;
+      const cached = fallbackAssemblyId ? await this.getCachedAssembly(fallbackAssemblyId) : null;
       if (cached) {
         this.currentAssemblyId = cached.id;
         this.residentToken = (await AsyncStorage.getItem(TOKEN_KEY(cached.id))) ?? null;
