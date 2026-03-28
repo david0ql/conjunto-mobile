@@ -23,15 +23,22 @@ export interface RealtimeIceServer {
 
 export interface CallSessionPayload {
   id: string;
+  direction: 'outbound' | 'inbound';
   status: 'ringing' | 'active' | 'ended' | 'missed' | 'rejected';
-  apartmentId: string;
+  apartmentId: string | null;
   apartment: CallApartmentSummary | null;
-  initiatedByEmployeeId: string;
+  initiatedByEmployeeId: string | null;
   initiatedByEmployee: CallPeerSummary | null;
+  initiatedByResidentId: string | null;
+  initiatedByResident: CallPeerSummary | null;
   acceptedByResidentId: string | null;
   acceptedByResident: CallPeerSummary | null;
+  acceptedByEmployeeId: string | null;
+  acceptedByEmployee: CallPeerSummary | null;
   targetResidentIds: string[];
+  targetEmployeeIds: string[];
   rejectedResidentIds: string[];
+  rejectedEmployeeIds: string[];
   endedByUserId: string | null;
   endedByUserType: 'employee' | 'resident' | null;
   endedReason: string | null;

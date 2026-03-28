@@ -7,8 +7,12 @@ import { noirTheme } from '../design/theme';
 
 function phaseLabel(phase: ReturnType<typeof callStore.getState>['phase']) {
   switch (phase) {
+    case 'requesting-media':
+      return 'Solicitando micrófono';
     case 'incoming':
       return 'Llamada entrante';
+    case 'ringing':
+      return 'Llamando a portería';
     case 'connecting':
       return 'Conectando audio';
     case 'active':
@@ -26,18 +30,25 @@ function phaseLabel(phase: ReturnType<typeof callStore.getState>['phase']) {
 
 export function IntercomCallScreen() {
   const state = useSyncExternalStore(callStore.subscribe, callStore.getState);
-  const towerName = state.session?.apartment?.tower?.name ?? 'Residencia';
+  const isPorterCall = state.session?.direction === 'inbound';
+  const towerName = state.session?.apartment?.tower?.name ?? (isPorterCall ? 'Portería' : 'Residencia');
   const apartmentNumber = state.session?.apartment?.number ?? '—';
-  const caller = state.session?.initiatedByEmployee
-    ? `${state.session.initiatedByEmployee.name} ${state.session.initiatedByEmployee.lastName}`
-    : 'Porteria';
+  const caller = isPorterCall
+    ? state.session?.acceptedByEmployee
+      ? `${state.session.acceptedByEmployee.name} ${state.session.acceptedByEmployee.lastName}`
+      : 'Portería'
+    : state.session?.initiatedByEmployee
+      ? `${state.session.initiatedByEmployee.name} ${state.session.initiatedByEmployee.lastName}`
+      : 'Portería';
 
   return (
     <View style={styles.screen}>
       <View style={styles.panel}>
         <Text style={styles.eyebrow}>Intercom residencial</Text>
         <Text style={styles.title}>{towerName}</Text>
-        <Text style={styles.subtitle}>Apartamento {apartmentNumber}</Text>
+        <Text style={styles.subtitle}>
+          {state.session?.apartment ? `Apartamento ${apartmentNumber}` : 'Canal de voz en tiempo real'}
+        </Text>
 
         <View style={styles.avatar}>
           <MaterialIcons color={noirTheme.primary} name="support-agent" size={64} />

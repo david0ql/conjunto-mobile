@@ -2,7 +2,9 @@ import type { CallSessionPayload } from './types';
 
 export type MobileCallPhase =
   | 'idle'
+  | 'requesting-media'
   | 'incoming'
+  | 'ringing'
   | 'connecting'
   | 'active'
   | 'ending'

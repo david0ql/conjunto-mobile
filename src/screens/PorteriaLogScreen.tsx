@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Modal,
   Pressable,
@@ -16,6 +17,8 @@ import {
   NoirTopBar,
 } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
+import { callService } from '../realtime/calls/callService';
+import { callStore } from '../realtime/calls/callStore';
 import {
   getMyPackages,
   getMyAccessEntries,
@@ -111,6 +114,7 @@ function PackagePhotosModal({
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export function PorteriaLogScreen() {
+  const callState = useSyncExternalStore(callStore.subscribe, callStore.getState);
   const [activeTab, setActiveTab] = useState<'packages' | 'entries'>('packages');
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [entries, setEntries] = useState<AccessEntry[]>([]);
@@ -155,6 +159,18 @@ export function PorteriaLogScreen() {
   }, [activeTab, selectedAptId]);
 
   const pendingPackages = packages.filter((p) => !p.delivered);
+  const callBusy = callState.phase !== 'idle';
+
+  async function handleCallPorter() {
+    try {
+      await callService.callPorter();
+    } catch (error) {
+      Alert.alert(
+        'No fue posible llamar a portería',
+        error instanceof Error ? error.message : 'Intenta nuevamente en unos segundos.',
+      );
+    }
+  }
 
   return (
     <NoirScreen onRefresh={handleRefresh} refreshing={refreshing}>
@@ -163,6 +179,29 @@ export function PorteriaLogScreen() {
       <PackagePhotosModal pkg={selectedPkg} onClose={() => setSelectedPkg(null)} />
 
       <View style={styles.content}>
+        <View style={styles.callCard}>
+          <View style={styles.callCardCopy}>
+            <Eyebrow>Intercom</Eyebrow>
+            <Text style={styles.callCardTitle}>Llamar a portería</Text>
+            <Text style={styles.callCardText}>
+              Habla en tiempo real con el equipo de portería desde la app cuando necesites apoyo.
+            </Text>
+          </View>
+          <Pressable
+            disabled={callBusy}
+            onPress={() => void handleCallPorter()}
+            style={[styles.callButton, callBusy && styles.callButtonDisabled]}>
+            <MaterialIcons
+              color={callBusy ? noirTheme.secondary : '#000000'}
+              name="support-agent"
+              size={22}
+            />
+            <Text style={[styles.callButtonText, callBusy && styles.callButtonTextDisabled]}>
+              {callBusy ? 'Llamada en curso' : 'Llamar ahora'}
+            </Text>
+          </Pressable>
+        </View>
+
         <View style={styles.tabs}>
           <Pressable onPress={() => setActiveTab('packages')} style={styles.tabPill}>
             <Text style={activeTab === 'packages' ? styles.tabActive : styles.tab}>Paquetes</Text>
@@ -385,6 +424,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     gap: 28,
+  },
+  callCard: {
+    backgroundColor: noirTheme.surfaceLow,
+    padding: 20,
+    gap: 18,
+  },
+  callCardCopy: {
+    gap: 8,
+  },
+  callCardTitle: {
+    color: noirTheme.primary,
+    fontSize: 28,
+    lineHeight: 28,
+    fontWeight: '900',
+    letterSpacing: -1,
+    textTransform: 'uppercase',
+  },
+  callCardText: {
+    color: noirTheme.secondary,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  callButton: {
+    minHeight: 58,
+    backgroundColor: noirTheme.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  callButtonDisabled: {
+    backgroundColor: noirTheme.surfaceHigh,
+  },
+  callButtonText: {
+    color: '#000000',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+  callButtonTextDisabled: {
+    color: noirTheme.secondary,
   },
   tabs: {
     flexDirection: 'row',

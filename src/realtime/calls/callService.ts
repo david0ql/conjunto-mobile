@@ -44,6 +44,9 @@ class CallService {
       transports: ['websocket', 'polling'],
     });
 
+    this.socket.on('calls:outgoing', (session: CallSessionPayload) => {
+      void this.handleOutgoing(session);
+    });
     this.socket.on('calls:incoming', (session: CallSessionPayload) => {
       void this.handleIncoming(session);
     });
@@ -86,6 +89,51 @@ class CallService {
     this.stopAudioModes();
     callStore.reset();
     void this.dismissModal();
+  }
+
+  async callPorter() {
+    if (!this.socket || this.socket.disconnected) {
+      throw new Error('El canal en tiempo real no está conectado');
+    }
+
+    const current = callStore.getState();
+    if (current.phase !== 'idle') {
+      throw new Error('Ya existe una llamada en curso');
+    }
+
+    const hasPermission = await this.ensureMicrophonePermission();
+    if (!hasPermission) {
+      throw new Error('Debes habilitar el micrófono para llamar a portería');
+    }
+
+    callStore.setState({
+      session: null,
+      phase: 'requesting-media',
+      muted: false,
+      speaker: true,
+      error: null,
+    });
+    await this.ensureModal();
+
+    try {
+      this.localStream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      InCallManager.start({ media: 'audio', auto: true });
+      InCallManager.setKeepScreenOn(true);
+      InCallManager.setForceSpeakerphoneOn(true);
+
+      this.socket.emit('calls:call-porter');
+    } catch (error) {
+      this.stopAudioModes();
+      this.teardownRtc();
+      callStore.patch({
+        phase: 'error',
+        error: error instanceof Error ? error.message : 'No fue posible iniciar la llamada',
+      });
+      throw error;
+    }
   }
 
   async acceptCurrentCall() {
@@ -178,7 +226,31 @@ class CallService {
     callStore.patch({ speaker: nextSpeaker });
   }
 
+  private async handleOutgoing(session: CallSessionPayload) {
+    if (session.direction !== 'inbound') {
+      return;
+    }
+
+    if (this.teardownTimer) {
+      clearTimeout(this.teardownTimer);
+      this.teardownTimer = null;
+    }
+
+    callStore.patch({
+      session,
+      phase: 'ringing',
+      muted: false,
+      speaker: true,
+      error: null,
+    });
+    await this.ensureModal();
+  }
+
   private async handleIncoming(session: CallSessionPayload) {
+    if (session.direction !== 'outbound') {
+      return;
+    }
+
     if (this.teardownTimer) {
       clearTimeout(this.teardownTimer);
       this.teardownTimer = null;
@@ -197,21 +269,56 @@ class CallService {
 
   private async handleAccepted(session: CallSessionPayload) {
     const currentUser = authStore.getUser();
-    if (currentUser?.id && session.acceptedByResidentId && session.acceptedByResidentId !== currentUser.id) {
-      await this.handleTerminal({
-        ...session,
-        status: 'ended',
-        endedReason: 'answered_elsewhere',
+    if (session.direction === 'outbound') {
+      if (currentUser?.id && session.acceptedByResidentId && session.acceptedByResidentId !== currentUser.id) {
+        await this.handleTerminal({
+          ...session,
+          status: 'ended',
+          endedReason: 'answered_elsewhere',
+        });
+        return;
+      }
+
+      callStore.patch({
+        session,
+        phase: session.acceptedByResidentId ? 'connecting' : 'incoming',
+        error: null,
       });
+      await this.ensureModal();
+      return;
+    }
+
+    if (currentUser?.id && session.initiatedByResidentId && session.initiatedByResidentId !== currentUser.id) {
       return;
     }
 
     callStore.patch({
       session,
-      phase: session.acceptedByResidentId ? 'connecting' : 'incoming',
+      phase: 'connecting',
       error: null,
     });
     await this.ensureModal();
+    await this.startOfferForCall(session);
+  }
+
+  private async startOfferForCall(session: CallSessionPayload) {
+    if (!this.localStream) {
+      return;
+    }
+
+    const peer = await this.ensurePeer(session.id);
+    const offer = await peer.createOffer({
+      offerToReceiveAudio: true,
+    });
+    await peer.setLocalDescription(offer);
+
+    this.socket?.emit('calls:signal', {
+      callId: session.id,
+      signal: {
+        type: 'offer',
+        sdp: offer.sdp,
+      },
+    });
   }
 
   private async handleSignal(callId: string, signal: CallSignalEnvelope) {
@@ -245,6 +352,22 @@ class CallService {
           sdp: answer.sdp,
         },
       });
+      return;
+    }
+
+    if (signal.type === 'answer' && signal.sdp) {
+      if (!this.peer || this.peerCallId !== callId) {
+        return;
+      }
+
+      await this.peer.setRemoteDescription(
+        new RTCSessionDescription({
+          type: 'answer',
+          sdp: signal.sdp,
+        }),
+      );
+      await this.flushPendingRemoteCandidates(this.peer);
+      callStore.patch({ phase: 'active', error: null });
       return;
     }
 
@@ -315,6 +438,11 @@ class CallService {
   }
 
   private async handleTerminal(session: CallSessionPayload) {
+    const current = callStore.getState();
+    if (current.session?.id && current.session.id !== session.id) {
+      return;
+    }
+
     InCallManager.stopRingtone();
     this.stopAudioModes();
     this.teardownRtc();
