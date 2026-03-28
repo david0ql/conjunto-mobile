@@ -313,14 +313,34 @@ class AssemblyService {
     try {
       if (assemblyId) {
         const raw = await AsyncStorage.getItem(CACHE_KEY(assemblyId));
-        return raw ? (JSON.parse(raw) as AssemblyPayload) : null;
+        if (!raw) return null;
+
+        const cached = JSON.parse(raw) as AssemblyPayload;
+        if (cached.status !== 'active') {
+          await AsyncStorage.removeItem(CACHE_KEY(assemblyId));
+          return null;
+        }
+
+        return cached;
       }
 
       const keys = await AsyncStorage.getAllKeys();
       const cacheKeys = keys.filter((k) => k.startsWith('assembly.cache.'));
       if (cacheKeys.length === 0) return null;
-      const raw = await AsyncStorage.getItem(cacheKeys[0]);
-      return raw ? (JSON.parse(raw) as AssemblyPayload) : null;
+
+      for (const key of cacheKeys) {
+        const raw = await AsyncStorage.getItem(key);
+        if (!raw) continue;
+
+        const cached = JSON.parse(raw) as AssemblyPayload;
+        if (cached.status === 'active') {
+          return cached;
+        }
+
+        await AsyncStorage.removeItem(key);
+      }
+
+      return null;
     } catch {
       return null;
     }
@@ -408,11 +428,7 @@ class AssemblyService {
 
   private async clearActiveAssemblyState() {
     const current = assemblyStore.getState();
-    const assemblyId = this.currentAssemblyId ?? current.assembly?.id ?? null;
-
-    if (assemblyId) {
-      await AsyncStorage.removeItem(CACHE_KEY(assemblyId));
-    }
+    await this.clearCachedAssemblies();
 
     this.currentAssemblyId = null;
     this.residentToken = null;
@@ -429,6 +445,18 @@ class AssemblyService {
       phase: 'idle',
       error: null,
     });
+  }
+
+  private async clearCachedAssemblies() {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const cacheKeys = keys.filter((key) => key.startsWith('assembly.cache.'));
+      if (cacheKeys.length > 0) {
+        await Promise.all(cacheKeys.map((key) => AsyncStorage.removeItem(key)));
+      }
+    } catch {
+      // Cache cleanup is best-effort; UI state is still reset locally.
+    }
   }
 
   private async syncPendingVotesForStoredAssemblies() {
