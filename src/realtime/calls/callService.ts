@@ -105,7 +105,9 @@ class CallService {
 
   subscribePorters(listener: (porters: PorterAvailability[]) => void) {
     this.porterListeners.add(listener);
-    return () => this.porterListeners.delete(listener);
+    return () => {
+      this.porterListeners.delete(listener);
+    };
   }
 
   async refreshPorters() {
