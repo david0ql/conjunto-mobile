@@ -83,16 +83,25 @@ export function HomeNewsScreen({ componentId }: NavigationComponentProps) {
                   <Pressable
                     key={item.id}
                     onPress={() => pushScreen(componentId, COMPONENTS.newsDetail, { newsId: item.id })}>
-                    <ImageBackground
-                      source={imgUri ? { uri: imgUri } : require('../assets/news-placeholder.png')}
-                      style={styles.recentCard}
-                      imageStyle={styles.cardImage}>
-                      <View style={styles.cardOverlay} />
-                      <View style={styles.recentCardContent}>
-                        <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
-                        <Text style={styles.recentTitle}>{item.title}</Text>
+                    {imgUri ? (
+                      <ImageBackground
+                        source={{ uri: imgUri }}
+                        style={styles.recentCard}
+                        imageStyle={styles.cardImage}>
+                        <View style={styles.cardOverlay} />
+                        <View style={styles.recentCardContent}>
+                          <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
+                          <Text style={styles.recentTitle}>{item.title}</Text>
+                        </View>
+                      </ImageBackground>
+                    ) : (
+                      <View style={[styles.recentCard, styles.recentCardPlaceholder]}>
+                        <View style={styles.recentCardContent}>
+                          <Text style={styles.tag}>{item.category?.name ?? 'General'}</Text>
+                          <Text style={styles.recentTitle}>{item.title}</Text>
+                        </View>
                       </View>
-                    </ImageBackground>
+                    )}
                   </Pressable>
                 );
               })}
@@ -196,6 +205,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     backgroundColor: noirTheme.surfaceHighest,
     overflow: 'hidden',
+  },
+  recentCardPlaceholder: {
+    borderWidth: 1,
+    borderColor: noirTheme.outline,
+    backgroundColor: noirTheme.surfaceHigh,
   },
   cardImage: {
     resizeMode: 'cover',
