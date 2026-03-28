@@ -30,7 +30,8 @@ function phaseLabel(phase: ReturnType<typeof callStore.getState>['phase']) {
 
 export function IntercomCallScreen() {
   const state = useSyncExternalStore(callStore.subscribe, callStore.getState);
-  const isPorterCall = state.session?.direction === 'inbound';
+  const isPorterCall =
+    state.session?.direction === 'inbound' || (!state.session && (state.phase === 'requesting-media' || state.phase === 'ringing'));
   const towerName = state.session?.apartment?.tower?.name ?? (isPorterCall ? 'Portería' : 'Residencia');
   const apartmentNumber = state.session?.apartment?.number ?? '—';
   const caller = isPorterCall

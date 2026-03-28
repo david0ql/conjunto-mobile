@@ -91,7 +91,7 @@ class CallService {
     void this.dismissModal();
   }
 
-  async callPorter() {
+  async callPorter(employeeId: string) {
     if (!this.socket || this.socket.disconnected) {
       throw new Error('El canal en tiempo real no está conectado');
     }
@@ -124,7 +124,7 @@ class CallService {
       InCallManager.setKeepScreenOn(true);
       InCallManager.setForceSpeakerphoneOn(true);
 
-      this.socket.emit('calls:call-porter');
+      this.socket.emit('calls:call-porter', { employeeId });
     } catch (error) {
       this.stopAudioModes();
       this.teardownRtc();

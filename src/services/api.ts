@@ -136,6 +136,14 @@ export interface CallsIceConfigResponse {
   }>;
 }
 
+export interface PorterAvailability {
+  id: string;
+  username: string;
+  name: string;
+  lastName: string;
+  available: boolean;
+}
+
 // ─── HTTP client ──────────────────────────────────────────────────────────────
 
 async function request<T>(
@@ -271,6 +279,10 @@ export async function getMyQr(apartmentId: string): Promise<{ dataUrl: string; r
 
 export async function getCallsIceConfig(): Promise<CallsIceConfigResponse> {
   return request<CallsIceConfigResponse>('GET', '/calls/ice-config');
+}
+
+export async function getCallPorters(): Promise<PorterAvailability[]> {
+  return request<PorterAvailability[]>('GET', '/calls/porters');
 }
 
 // ─── Assemblies ───────────────────────────────────────────────────────────────

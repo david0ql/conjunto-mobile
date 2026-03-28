@@ -20,6 +20,7 @@ import { noirTheme } from '../design/theme';
 import { callService } from '../realtime/calls/callService';
 import { callStore } from '../realtime/calls/callStore';
 import {
+  getCallPorters,
   getMyPackages,
   getMyAccessEntries,
   getMyApartments,
@@ -29,6 +30,7 @@ import {
   type PackagePhoto,
   type AccessEntry,
   type ResidentApartment,
+  type PorterAvailability,
 } from '../services/api';
 
 function formatRelativeTime(dateStr: string): string {
@@ -116,9 +118,11 @@ function PackagePhotosModal({
 export function PorteriaLogScreen() {
   const callState = useSyncExternalStore(callStore.subscribe, callStore.getState);
   const [activeTab, setActiveTab] = useState<'packages' | 'entries'>('packages');
+  const [porters, setPorters] = useState<PorterAvailability[]>([]);
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [entries, setEntries] = useState<AccessEntry[]>([]);
   const [apartments, setApartments] = useState<ResidentApartment[]>([]);
+  const [loadingPorters, setLoadingPorters] = useState(true);
   const [selectedAptIdx, setSelectedAptIdx] = useState(0);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
@@ -134,6 +138,14 @@ export function PorteriaLogScreen() {
       .finally(() => setLoadingPackages(false));
   }
 
+  function fetchPorters() {
+    setLoadingPorters(true);
+    getCallPorters()
+      .then(setPorters)
+      .catch(() => setPorters([]))
+      .finally(() => setLoadingPorters(false));
+  }
+
   function fetchEntries(aptId?: string) {
     setLoadingEntries(true);
     getMyAccessEntries(aptId)
@@ -144,13 +156,17 @@ export function PorteriaLogScreen() {
 
   function handleRefresh() {
     setRefreshing(true);
-    const fetches = [getMyPackages().then(setPackages).catch(() => {})];
+    const fetches = [
+      getMyPackages().then(setPackages).catch(() => {}),
+      getCallPorters().then(setPorters).catch(() => {}),
+    ];
     if (activeTab === 'entries') fetches.push(getMyAccessEntries(selectedAptId).then(setEntries).catch(() => {}));
     Promise.all(fetches).finally(() => setRefreshing(false));
   }
 
   useEffect(() => {
     fetchPackages();
+    fetchPorters();
     getMyApartments().then(setApartments).catch(() => {});
   }, []);
 
@@ -161,9 +177,9 @@ export function PorteriaLogScreen() {
   const pendingPackages = packages.filter((p) => !p.delivered);
   const callBusy = callState.phase !== 'idle';
 
-  async function handleCallPorter() {
+  async function handleCallPorter(porter: PorterAvailability) {
     try {
-      await callService.callPorter();
+      await callService.callPorter(porter.id);
     } catch (error) {
       Alert.alert(
         'No fue posible llamar a portería',
@@ -184,22 +200,48 @@ export function PorteriaLogScreen() {
             <Eyebrow>Intercom</Eyebrow>
             <Text style={styles.callCardTitle}>Llamar a portería</Text>
             <Text style={styles.callCardText}>
-              Habla en tiempo real con el equipo de portería desde la app cuando necesites apoyo.
+              Elige el portero exacto con quien quieres hablar. Cada portero solo puede atender una llamada a la vez.
             </Text>
           </View>
-          <Pressable
-            disabled={callBusy}
-            onPress={() => void handleCallPorter()}
-            style={[styles.callButton, callBusy && styles.callButtonDisabled]}>
-            <MaterialIcons
-              color={callBusy ? noirTheme.secondary : '#000000'}
-              name="support-agent"
-              size={22}
-            />
-            <Text style={[styles.callButtonText, callBusy && styles.callButtonTextDisabled]}>
-              {callBusy ? 'Llamada en curso' : 'Llamar ahora'}
-            </Text>
-          </Pressable>
+
+          {loadingPorters ? (
+            <View style={[styles.skeleton, styles.callSkeleton]} />
+          ) : porters.length === 0 ? (
+            <Text style={styles.callCardEmpty}>No hay porteros activos disponibles en este momento.</Text>
+          ) : (
+            <View style={styles.porterList}>
+              {porters.map((porter) => {
+                const disabled = callBusy || !porter.available;
+                const displayName = `${porter.username} · ${porter.name} ${porter.lastName}`;
+
+                return (
+                  <Pressable
+                    key={porter.id}
+                    disabled={disabled}
+                    onPress={() => void handleCallPorter(porter)}
+                    style={[styles.callButton, disabled && styles.callButtonDisabled]}>
+                    <View style={styles.callButtonCopy}>
+                      <Text style={[styles.callButtonText, disabled && styles.callButtonTextDisabled]}>
+                        {displayName}
+                      </Text>
+                      <Text style={[styles.callButtonMeta, disabled && styles.callButtonMetaDisabled]}>
+                        {callBusy
+                          ? 'Llamada en curso'
+                          : porter.available
+                            ? 'Disponible'
+                            : 'Ocupado'}
+                      </Text>
+                    </View>
+                    <MaterialIcons
+                      color={disabled ? noirTheme.secondary : '#000000'}
+                      name="support-agent"
+                      size={22}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </View>
 
         <View style={styles.tabs}>
@@ -446,16 +488,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
   },
+  callCardEmpty: {
+    color: noirTheme.secondary,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  callSkeleton: {
+    height: 132,
+  },
+  porterList: {
+    gap: 10,
+  },
   callButton: {
-    minHeight: 58,
+    minHeight: 62,
     backgroundColor: noirTheme.primary,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     gap: 10,
+    paddingHorizontal: 16,
   },
   callButtonDisabled: {
     backgroundColor: noirTheme.surfaceHigh,
+  },
+  callButtonCopy: {
+    flex: 1,
+    gap: 4,
   },
   callButtonText: {
     color: '#000000',
@@ -465,6 +523,16 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   callButtonTextDisabled: {
+    color: noirTheme.secondary,
+  },
+  callButtonMeta: {
+    color: '#000000',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+  },
+  callButtonMetaDisabled: {
     color: noirTheme.secondary,
   },
   tabs: {
