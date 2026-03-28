@@ -20,7 +20,6 @@ import { noirTheme } from '../design/theme';
 import { callService } from '../realtime/calls/callService';
 import { callStore } from '../realtime/calls/callStore';
 import {
-  getCallPorters,
   getMyPackages,
   getMyAccessEntries,
   getMyApartments,
@@ -140,9 +139,8 @@ export function PorteriaLogScreen() {
 
   function fetchPorters() {
     setLoadingPorters(true);
-    getCallPorters()
+    callService.refreshPorters()
       .then(setPorters)
-      .catch(() => setPorters([]))
       .finally(() => setLoadingPorters(false));
   }
 
@@ -158,16 +156,22 @@ export function PorteriaLogScreen() {
     setRefreshing(true);
     const fetches = [
       getMyPackages().then(setPackages).catch(() => {}),
-      getCallPorters().then(setPorters).catch(() => {}),
+      callService.refreshPorters().then(setPorters),
     ];
     if (activeTab === 'entries') fetches.push(getMyAccessEntries(selectedAptId).then(setEntries).catch(() => {}));
     Promise.all(fetches).finally(() => setRefreshing(false));
   }
 
   useEffect(() => {
+    const unsubscribe = callService.subscribePorters((nextPorters) => {
+      setPorters(nextPorters);
+      setLoadingPorters(false);
+    });
+
     fetchPackages();
     fetchPorters();
     getMyApartments().then(setApartments).catch(() => {});
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -224,13 +228,17 @@ export function PorteriaLogScreen() {
                       <Text style={[styles.callButtonText, disabled && styles.callButtonTextDisabled]}>
                         {displayName}
                       </Text>
-                      <Text style={[styles.callButtonMeta, disabled && styles.callButtonMetaDisabled]}>
-                        {callBusy
-                          ? 'Llamada en curso'
-                          : porter.available
-                            ? 'Disponible'
-                            : 'Ocupado'}
-                      </Text>
+                      <View style={styles.callStatusRow}>
+                        <View
+                          style={[
+                            styles.callStatusDot,
+                            porter.available ? styles.callStatusDotAvailable : styles.callStatusDotBusy,
+                          ]}
+                        />
+                        <Text style={[styles.callButtonMeta, disabled && styles.callButtonMetaDisabled]}>
+                          {porter.available ? 'Disponible' : 'Ocupado'}
+                        </Text>
+                      </View>
                     </View>
                     <MaterialIcons
                       color={disabled ? noirTheme.secondary : '#000000'}
@@ -514,6 +522,22 @@ const styles = StyleSheet.create({
   callButtonCopy: {
     flex: 1,
     gap: 4,
+  },
+  callStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  callStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  callStatusDotAvailable: {
+    backgroundColor: '#16a34a',
+  },
+  callStatusDotBusy: {
+    backgroundColor: '#dc2626',
   },
   callButtonText: {
     color: '#000000',

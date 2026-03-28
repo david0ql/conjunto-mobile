@@ -11,7 +11,7 @@ import {
 import { io, type Socket } from 'socket.io-client';
 import { authStore } from '../../context/auth.store';
 import { COMPONENTS } from '../../navigation/componentNames';
-import { getCallsIceConfig, REALTIME_URL } from '../../services/api';
+import { getCallPorters, getCallsIceConfig, REALTIME_URL, type PorterAvailability } from '../../services/api';
 import { callStore } from './callStore';
 import type {
   CallSessionPayload,
@@ -30,6 +30,8 @@ class CallService {
   private teardownTimer: ReturnType<typeof setTimeout> | null = null;
   private peerCallId: string | null = null;
   private pendingRemoteCandidates: NonNullable<CallSignalEnvelope['candidate']>[] = [];
+  private porters: PorterAvailability[] = [];
+  private porterListeners = new Set<(porters: PorterAvailability[]) => void>();
 
   start(token: string) {
     if (this.socket && this.activeToken === token) {
@@ -65,6 +67,9 @@ class CallService {
     this.socket.on('calls:rejected', (session: CallSessionPayload) => {
       void this.handleTerminal(session);
     });
+    this.socket.on('calls:porters-updated', (porters: PorterAvailability[]) => {
+      this.setPorters(porters);
+    });
     this.socket.on('calls:error', (event: { message?: string }) => {
       callStore.patch({
         phase: 'error',
@@ -72,6 +77,8 @@ class CallService {
       });
       void this.ensureModal();
     });
+
+    void this.refreshPorters();
   }
 
   stop() {
@@ -88,7 +95,28 @@ class CallService {
     this.teardownRtc();
     this.stopAudioModes();
     callStore.reset();
+    this.setPorters([]);
     void this.dismissModal();
+  }
+
+  getCurrentPorters() {
+    return this.porters;
+  }
+
+  subscribePorters(listener: (porters: PorterAvailability[]) => void) {
+    this.porterListeners.add(listener);
+    return () => this.porterListeners.delete(listener);
+  }
+
+  async refreshPorters() {
+    try {
+      const porters = await getCallPorters();
+      this.setPorters(porters);
+      return porters;
+    } catch {
+      this.setPorters([]);
+      return [];
+    }
   }
 
   async callPorter(employeeId: string) {
@@ -557,6 +585,11 @@ class CallService {
     for (const candidate of candidates) {
       await this.addRemoteIceCandidate(peer, candidate);
     }
+  }
+
+  private setPorters(porters: PorterAvailability[]) {
+    this.porters = porters;
+    this.porterListeners.forEach((listener) => listener(porters));
   }
 
   private async ensureModal() {
