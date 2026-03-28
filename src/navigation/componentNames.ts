@@ -9,6 +9,7 @@ export const COMPONENTS = {
   createReservation: 'app.createReservation',
   profileQr: 'app.profileQr',
   intercomCall: 'app.intercomCall',
+  assemblyVoting: 'app.assemblyVoting',
 } as const;
 
 export type ComponentName = (typeof COMPONENTS)[keyof typeof COMPONENTS];

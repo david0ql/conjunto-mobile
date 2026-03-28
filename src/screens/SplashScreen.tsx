@@ -8,6 +8,7 @@ import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
 import { getMe } from '../services/api';
 import { callService } from '../realtime/calls/callService';
+import { assemblyService } from '../realtime/assemblies/assemblyService';
 
 export function SplashScreen() {
   useEffect(() => {
@@ -21,17 +22,20 @@ export function SplashScreen() {
           const token = authStore.getToken();
           if (token) {
             callService.start(token);
+            assemblyService.start(token);
           }
           setShellRoot(COMPONENTS.homeNews);
         } catch {
           // Token is invalid or expired — clear and go to login
           callService.stop();
+          assemblyService.stop();
           await authStore.clearSession();
           setShellRoot(COMPONENTS.login);
         }
       } else {
         // No token stored — go to login after a short branded delay
         callService.stop();
+        assemblyService.stop();
         setTimeout(() => setShellRoot(COMPONENTS.login), 1400);
       }
     }

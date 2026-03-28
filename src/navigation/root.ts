@@ -47,6 +47,7 @@ const MAIN_TABS = [
   COMPONENTS.homeNews,
   COMPONENTS.zonesBrowse,
   COMPONENTS.porteriaLog,
+  COMPONENTS.assemblyVoting,
   COMPONENTS.profileQr,
 ] as const;
 
@@ -54,6 +55,7 @@ const MAIN_TAB_STACK_IDS = {
   [COMPONENTS.homeNews]: 'tab.news.stack',
   [COMPONENTS.zonesBrowse]: 'tab.spaces.stack',
   [COMPONENTS.porteriaLog]: 'tab.services.stack',
+  [COMPONENTS.assemblyVoting]: 'tab.assembly.stack',
   [COMPONENTS.profileQr]: 'tab.profile.stack',
 } as const;
 
@@ -61,6 +63,7 @@ const TAB_ICONS = {
   [COMPONENTS.homeNews]: (MaterialIcons as any).getImageSourceSync('home', 20, noirTheme.primary),
   [COMPONENTS.zonesBrowse]: (MaterialIcons as any).getImageSourceSync('apps', 20, noirTheme.primary),
   [COMPONENTS.porteriaLog]: (MaterialIcons as any).getImageSourceSync('local-shipping', 20, noirTheme.primary),
+  [COMPONENTS.assemblyVoting]: (MaterialIcons as any).getImageSourceSync('how-to-vote', 20, noirTheme.primary),
   [COMPONENTS.profileQr]: (MaterialIcons as any).getImageSourceSync('person', 20, noirTheme.primary),
 } as const;
 
@@ -131,6 +134,25 @@ function buildMainTabsRoot(selectedTab: (typeof MAIN_TABS)[number]) {
                   text: 'Servicios',
                   icon: TAB_ICONS[COMPONENTS.porteriaLog],
                   selectedIcon: TAB_ICONS[COMPONENTS.porteriaLog],
+                  fontSize: 9,
+                  selectedFontSize: 9,
+                  iconColor: noirTheme.secondary,
+                  selectedIconColor: noirTheme.primary,
+                  textColor: noirTheme.secondary,
+                  selectedTextColor: noirTheme.primary,
+                },
+              },
+            },
+          },
+          {
+            stack: {
+              id: MAIN_TAB_STACK_IDS[COMPONENTS.assemblyVoting],
+              children: [stackComponent(COMPONENTS.assemblyVoting)],
+              options: {
+                bottomTab: {
+                  text: 'Asamblea',
+                  icon: TAB_ICONS[COMPONENTS.assemblyVoting],
+                  selectedIcon: TAB_ICONS[COMPONENTS.assemblyVoting],
                   fontSize: 9,
                   selectedFontSize: 9,
                   iconColor: noirTheme.secondary,

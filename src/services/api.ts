@@ -273,6 +273,44 @@ export async function getCallsIceConfig(): Promise<CallsIceConfigResponse> {
   return request<CallsIceConfigResponse>('GET', '/calls/ice-config');
 }
 
+// ─── Assemblies ───────────────────────────────────────────────────────────────
+
+export interface AssemblyTokenResponse {
+  token: string;
+  formatted: string;
+}
+
+export interface SyncVoteInput {
+  questionId: string;
+  assemblyId: string;
+  vote: 'yes' | 'no' | 'blank';
+  votedAt: string;
+  token?: string;
+}
+
+export interface SyncVoteResult {
+  questionId: string;
+  accepted: boolean;
+  reason?: string;
+}
+
+export async function getActiveAssembly(): Promise<import('../realtime/assemblies/types').AssemblyPayload | null> {
+  try {
+    return await request<import('../realtime/assemblies/types').AssemblyPayload>('GET', '/assemblies/active');
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export async function getMyToken(assemblyId: string): Promise<AssemblyTokenResponse> {
+  return request<AssemblyTokenResponse>('GET', `/assemblies/${assemblyId}/my-token`);
+}
+
+export async function syncVotes(assemblyId: string, votes: SyncVoteInput[]): Promise<SyncVoteResult[]> {
+  return request<SyncVoteResult[]>('POST', `/assemblies/${assemblyId}/sync-votes`, { votes });
+}
+
 // ─── Image URL helper ─────────────────────────────────────────────────────────
 
 export function resolveImageUrl(path: string | null | undefined): string | null {

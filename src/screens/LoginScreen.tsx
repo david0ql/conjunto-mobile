@@ -17,6 +17,7 @@ import { COMPONENTS } from '../navigation/componentNames';
 import { loginResident, ApiError } from '../services/api';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
+import { assemblyService } from '../realtime/assemblies/assemblyService';
 
 export function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
@@ -37,6 +38,7 @@ export function LoginScreen() {
       const response = await loginResident(id, pw);
       await authStore.setSession(response.accessToken, response.user);
       callService.start(response.accessToken);
+      assemblyService.start(response.accessToken);
       setShellRoot(COMPONENTS.homeNews);
     } catch (error) {
       if (error instanceof ApiError) {
