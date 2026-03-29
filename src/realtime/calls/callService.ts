@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { AppState, PermissionsAndroid, Platform, type AppStateStatus } from 'react-native';
 import { Navigation } from 'react-native-navigation';
 import InCallManager from 'react-native-incall-manager';
 import {
@@ -12,6 +12,7 @@ import { io, type Socket } from 'socket.io-client';
 import { authStore } from '../../context/auth.store';
 import { COMPONENTS } from '../../navigation/componentNames';
 import { getCallPorters, getCallsIceConfig, REALTIME_URL, type PorterAvailability } from '../../services/api';
+import { callNative, CALL_END_REASONS } from './callNative';
 import { callStore } from './callStore';
 import type {
   CallSessionPayload,
@@ -32,9 +33,47 @@ class CallService {
   private pendingRemoteCandidates: NonNullable<CallSignalEnvelope['candidate']>[] = [];
   private porters: PorterAvailability[] = [];
   private porterListeners = new Set<(porters: PorterAvailability[]) => void>();
+  private appState: AppStateStatus = AppState.currentState;
+  private appStateSubscription: { remove: () => void } | null = null;
+  private bootstrapped = false;
+  private micWarmupPromise: Promise<boolean> | null = null;
+
+  bootstrap() {
+    if (this.bootstrapped) {
+      return;
+    }
+
+    this.bootstrapped = true;
+    void callNative
+      .initialize({
+        onAnswerCall: async (callId) => {
+          await this.handleSystemAnswer(callId);
+        },
+        onEndCall: async (callId) => {
+          await this.handleSystemEnd(callId);
+        },
+        onOpenCallUi: async () => {
+          await this.handleOpenCallUi();
+        },
+      })
+      .catch((error) => {
+        console.warn('No fue posible inicializar CallKeep/Notifee', error);
+      });
+
+    this.appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      this.appState = nextState;
+      if (nextState === 'active') {
+        void this.ensureBackgroundReadiness().catch(() => undefined);
+        void this.ensureModalIfNeeded();
+      }
+    });
+  }
 
   start(token: string) {
+    this.bootstrap();
+
     if (this.socket && this.activeToken === token) {
+      void this.ensureBackgroundReadiness().catch(() => undefined);
       return;
     }
 
@@ -46,6 +85,14 @@ class CallService {
       transports: ['websocket', 'polling'],
     });
 
+    this.socket.on('connect', () => {
+      void callNative.showReadyNotification('ready');
+    });
+    this.socket.on('disconnect', () => {
+      if (this.activeToken) {
+        void callNative.showOfflineNotification();
+      }
+    });
     this.socket.on('calls:outgoing', (session: CallSessionPayload) => {
       void this.handleOutgoing(session);
     });
@@ -74,11 +121,15 @@ class CallService {
       callStore.patch({
         phase: 'error',
         error: event.message ?? 'No fue posible operar la llamada',
+        startedAt: null,
       });
-      void this.ensureModal();
+      void this.ensureModalIfNeeded();
     });
 
     void this.refreshPorters().catch(() => undefined);
+    void this.ensureBackgroundReadiness().catch((error) => {
+      console.warn('No fue posible preparar el modo segundo plano', error);
+    });
   }
 
   stop() {
@@ -96,6 +147,7 @@ class CallService {
     this.stopAudioModes();
     callStore.reset();
     this.setPorters([]);
+    void callNative.teardownSystemState();
     void this.dismissModal();
   }
 
@@ -142,8 +194,9 @@ class CallService {
       muted: false,
       speaker: true,
       error: null,
+      startedAt: null,
     });
-    await this.ensureModal();
+    await this.ensureModalIfNeeded();
 
     try {
       this.localStream = await mediaDevices.getUserMedia({
@@ -161,12 +214,13 @@ class CallService {
       callStore.patch({
         phase: 'error',
         error: error instanceof Error ? error.message : 'No fue posible iniciar la llamada',
+        startedAt: null,
       });
       throw error;
     }
   }
 
-  async acceptCurrentCall() {
+  async acceptCurrentCall(fromSystem = false) {
     const current = callStore.getState();
     if (!current.session) {
       return;
@@ -176,13 +230,18 @@ class CallService {
     if (!hasPermission) {
       callStore.patch({
         phase: 'error',
-        error: 'Debes habilitar el microfono para contestar la llamada',
+        error: 'Debes habilitar el micrófono para contestar la llamada',
+        startedAt: null,
       });
-      await this.ensureModal();
+      await callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
+      await this.ensureModalIfNeeded();
       return;
     }
 
     try {
+      if (!fromSystem) {
+        await callNative.answerIncomingCall(current.session.id);
+      }
       InCallManager.stopRingtone();
       this.localStream = await mediaDevices.getUserMedia({
         audio: true,
@@ -201,11 +260,12 @@ class CallService {
       this.socket?.emit('calls:accept', {
         callId: current.session.id,
       });
-      await this.ensureModal();
+      await this.ensureModalIfNeeded(true);
     } catch (error) {
       callStore.patch({
         phase: 'error',
         error: error instanceof Error ? error.message : 'No fue posible abrir el audio',
+        startedAt: null,
       });
     }
   }
@@ -220,6 +280,7 @@ class CallService {
     callStore.patch({ phase: 'ending' });
     this.teardownRtc();
     this.stopAudioModes();
+    void callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
     this.socket?.emit('calls:reject', {
       callId: current.session.id,
     });
@@ -234,6 +295,7 @@ class CallService {
     callStore.patch({ phase: 'ending' });
     this.teardownRtc();
     this.stopAudioModes();
+    void callNative.endCall(current.session.id, CALL_END_REASONS.REMOTE_ENDED);
     this.socket?.emit('calls:end', {
       callId: current.session.id,
       reason,
@@ -246,6 +308,9 @@ class CallService {
     this.localStream?.getAudioTracks().forEach((track) => {
       track.enabled = !nextMuted;
     });
+    if (current.session) {
+      void callNative.syncMuted(current.session.id, nextMuted);
+    }
     callStore.patch({ muted: nextMuted });
   }
 
@@ -253,6 +318,9 @@ class CallService {
     const current = callStore.getState();
     const nextSpeaker = !current.speaker;
     InCallManager.setForceSpeakerphoneOn(nextSpeaker);
+    if (current.session) {
+      void callNative.syncSpeaker(current.session.id, nextSpeaker);
+    }
     callStore.patch({ speaker: nextSpeaker });
   }
 
@@ -266,14 +334,16 @@ class CallService {
       this.teardownTimer = null;
     }
 
+    await callNative.startOutgoingCall(session);
     callStore.patch({
       session,
       phase: 'ringing',
       muted: false,
       speaker: true,
       error: null,
+      startedAt: null,
     });
-    await this.ensureModal();
+    await this.ensureModalIfNeeded();
   }
 
   private async handleIncoming(session: CallSessionPayload) {
@@ -292,13 +362,17 @@ class CallService {
       muted: false,
       speaker: true,
       error: null,
+      startedAt: null,
     });
     InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
-    await this.ensureModal();
+    await callNative.showIncomingCall(session);
+    await this.ensureModalIfNeeded();
   }
 
   private async handleAccepted(session: CallSessionPayload) {
     const currentUser = authStore.getUser();
+    const startedAt = this.getSessionStartedAt(session);
+
     if (session.direction === 'outbound') {
       if (currentUser?.id && session.acceptedByResidentId && session.acceptedByResidentId !== currentUser.id) {
         await this.handleTerminal({
@@ -313,8 +387,10 @@ class CallService {
         session,
         phase: session.acceptedByResidentId ? 'connecting' : 'incoming',
         error: null,
+        startedAt,
       });
-      await this.ensureModal();
+      await callNative.markCallConnecting(session, startedAt);
+      await this.ensureModalIfNeeded();
       return;
     }
 
@@ -326,8 +402,10 @@ class CallService {
       session,
       phase: 'connecting',
       error: null,
+      startedAt,
     });
-    await this.ensureModal();
+    await callNative.markCallConnecting(session, startedAt);
+    await this.ensureModalIfNeeded();
     await this.startOfferForCall(session);
   }
 
@@ -397,7 +475,9 @@ class CallService {
         }),
       );
       await this.flushPendingRemoteCandidates(this.peer);
-      callStore.patch({ phase: 'active', error: null });
+      const startedAt = current.startedAt ?? Date.now();
+      callStore.patch({ phase: 'active', error: null, startedAt });
+      await callNative.markCallActive(current.session, startedAt);
       return;
     }
 
@@ -451,14 +531,22 @@ class CallService {
 
     (peer as any).onconnectionstatechange = () => {
       if (peer.connectionState === 'connected') {
-        callStore.patch({ phase: 'active', error: null });
+        const current = callStore.getState();
+        const startedAt = current.startedAt ?? Date.now();
+        callStore.patch({ phase: 'active', error: null, startedAt });
+        if (current.session) {
+          void callNative.markCallActive(current.session, startedAt);
+        }
       }
 
       if (peer.connectionState === 'failed') {
         callStore.patch({
           phase: 'error',
-          error: 'La conexion de audio fallo',
+          error: 'La conexión de audio falló',
         });
+        if (this.peerCallId) {
+          void callNative.endCall(this.peerCallId, CALL_END_REASONS.FAILED);
+        }
       }
     };
 
@@ -481,17 +569,27 @@ class CallService {
       session.endedReason === 'answered_elsewhere'
         ? 'La llamada fue atendida desde otro dispositivo'
         : session.status === 'missed'
-          ? 'La llamada se perdio'
+          ? 'La llamada se perdió'
           : session.status === 'rejected'
             ? 'La llamada fue rechazada'
             : 'Llamada finalizada';
+
+    await callNative.endCall(session.id, this.mapEndReason(session));
+    if (this.activeToken) {
+      if (this.socket?.connected) {
+        void callNative.showReadyNotification('ready');
+      } else {
+        void callNative.showOfflineNotification();
+      }
+    }
 
     callStore.patch({
       session,
       phase: 'ended',
       error: reason,
+      startedAt: null,
     });
-    await this.ensureModal();
+    await this.ensureModalIfNeeded();
 
     if (this.teardownTimer) {
       clearTimeout(this.teardownTimer);
@@ -513,22 +611,41 @@ class CallService {
     return response.iceServers;
   }
 
-  private async ensureMicrophonePermission() {
-    if (Platform.OS !== 'android') {
+  private async ensureMicrophonePermission(isWarmup = false) {
+    if (Platform.OS === 'android') {
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        {
+          title: 'Micrófono para intercom',
+          message: 'Se necesita acceso al micrófono para contestar llamadas de portería.',
+          buttonPositive: 'Permitir',
+          buttonNegative: 'Cancelar',
+        },
+      );
+
+      return result === PermissionsAndroid.RESULTS.GRANTED;
+    }
+
+    if (!isWarmup) {
       return true;
     }
 
-    const result = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-      {
-        title: 'Microfono para intercom',
-        message: 'Se necesita acceso al microfono para contestar llamadas de porteria.',
-        buttonPositive: 'Permitir',
-        buttonNegative: 'Cancelar',
-      },
-    );
+    if (this.micWarmupPromise) {
+      return this.micWarmupPromise;
+    }
 
-    return result === PermissionsAndroid.RESULTS.GRANTED;
+    this.micWarmupPromise = mediaDevices
+      .getUserMedia({ audio: true, video: false })
+      .then((stream) => {
+        stream.getTracks().forEach((track) => track.stop());
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        this.micWarmupPromise = null;
+      });
+
+    return this.micWarmupPromise;
   }
 
   private stopAudioModes() {
@@ -594,6 +711,64 @@ class CallService {
     this.porterListeners.forEach((listener) => listener(porters));
   }
 
+  private async ensureBackgroundReadiness() {
+    await callNative.ensureReadinessPermissions();
+    if (this.appState === 'active') {
+      await this.ensureMicrophonePermission(true);
+    }
+
+    if (this.socket?.connected) {
+      await callNative.showReadyNotification('ready');
+    } else {
+      await callNative.showOfflineNotification();
+    }
+  }
+
+  private async handleSystemAnswer(callId: string) {
+    const current = callStore.getState();
+    if (current.session?.id !== callId) {
+      return;
+    }
+
+    await this.acceptCurrentCall(true);
+  }
+
+  private async handleSystemEnd(callId: string) {
+    const current = callStore.getState();
+    if (current.session?.id !== callId) {
+      return;
+    }
+
+    if (current.phase === 'incoming') {
+      this.rejectCurrentCall();
+      return;
+    }
+
+    this.endCurrentCall();
+  }
+
+  private async handleOpenCallUi() {
+    await callNative.bringAppToFront();
+    await this.ensureModalIfNeeded(true);
+  }
+
+  private async ensureModalIfNeeded(forceForeground = false) {
+    const current = callStore.getState();
+    if (current.phase === 'idle') {
+      return;
+    }
+
+    if (forceForeground) {
+      await callNative.bringAppToFront();
+    }
+
+    if (this.appState !== 'active') {
+      return;
+    }
+
+    await this.ensureModal();
+  }
+
   private async ensureModal() {
     if (this.modalId) {
       return this.modalId;
@@ -623,6 +798,23 @@ class CallService {
       await Navigation.dismissModal(this.modalId);
     } catch {}
     this.modalId = null;
+  }
+
+  private getSessionStartedAt(session: CallSessionPayload) {
+    return session.acceptedAt ? new Date(session.acceptedAt).getTime() : null;
+  }
+
+  private mapEndReason(session: CallSessionPayload) {
+    if (session.endedReason === 'answered_elsewhere') {
+      return CALL_END_REASONS.ANSWERED_ELSEWHERE;
+    }
+    if (session.status === 'missed') {
+      return CALL_END_REASONS.MISSED;
+    }
+    if (session.status === 'rejected') {
+      return CALL_END_REASONS.UNANSWERED;
+    }
+    return CALL_END_REASONS.REMOTE_ENDED;
   }
 }
 

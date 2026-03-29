@@ -1928,6 +1928,13 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - RNCallKeep (4.3.16):
+    - React
+  - RNNotifee (9.1.8):
+    - React-Core
+    - RNNotifee/NotifeeCore (= 9.1.8)
+  - RNNotifee/NotifeeCore (9.1.8):
+    - React-Core
   - RNVectorIcons (10.3.0):
     - hermes-engine
     - RCTRequired
@@ -2032,6 +2039,8 @@ DEPENDENCIES:
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
   - ReactNativeIncallManager (from `../node_modules/react-native-incall-manager`)
   - ReactNativeNavigation (from `../node_modules/react-native-navigation`)
+  - RNCallKeep (from `../node_modules/react-native-callkeep`)
+  - "RNNotifee (from `../node_modules/@notifee/react-native`)"
   - RNVectorIcons (from `../node_modules/react-native-vector-icons`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
@@ -2198,6 +2207,10 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-incall-manager"
   ReactNativeNavigation:
     :path: "../node_modules/react-native-navigation"
+  RNCallKeep:
+    :path: "../node_modules/react-native-callkeep"
+  RNNotifee:
+    :path: "../node_modules/@notifee/react-native"
   RNVectorIcons:
     :path: "../node_modules/react-native-vector-icons"
   Yoga:
@@ -2284,6 +2297,8 @@ SPEC CHECKSUMS:
   ReactNativeDependencies: f9f37c6f4f70a78c396754ce2fe097b0a995352f
   ReactNativeIncallManager: dccd3e7499caa3bb73d3acfedf4fb0360f1a87d5
   ReactNativeNavigation: 9da1ac2167456405089828fc8677e804796f17e3
+  RNCallKeep: 1930a01d8caf48f018be4f2db0c9f03405c2f977
+  RNNotifee: 5e3b271e8ea7456a36eec994085543c9adca9168
   RNVectorIcons: 4351544f100d4f12cac156a7c13399e60bab3e26
   Yoga: c0b3f2c7e8d3e327e450223a2414ca3fa296b9a2
 

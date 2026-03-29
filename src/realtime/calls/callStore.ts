@@ -17,6 +17,7 @@ export interface MobileCallState {
   muted: boolean;
   speaker: boolean;
   error: string | null;
+  startedAt: number | null;
 }
 
 const listeners = new Set<() => void>();
@@ -27,6 +28,7 @@ const initialState: MobileCallState = {
   muted: false,
   speaker: true,
   error: null,
+  startedAt: null,
 };
 
 let state: MobileCallState = initialState;
