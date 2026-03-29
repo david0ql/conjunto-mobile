@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
 
 import java.io.FileInputStream
 import java.util.Properties
@@ -90,9 +91,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.myapp"
+    namespace "com.nordikhat.conjunto"
     defaultConfig {
-        applicationId "com.myapp"
+        applicationId "com.nordikhat.conjunto"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

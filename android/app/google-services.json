@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "60314472194",
+    "project_id": "conjunto-f8ce5",
+    "storage_bucket": "conjunto-f8ce5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:60314472194:android:2217b23976c6e74a027c1b",
+        "android_client_info": {
+          "package_name": "com.nordikhat.conjunto"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9i22Q5bfUxoB1ZoB6TvOrPsyjIWi5lxs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

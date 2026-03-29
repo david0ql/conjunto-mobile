@@ -1,4 +1,4 @@
-package com.myapp
+package com.nordikhat.conjunto
 
 import com.facebook.react.PackageList
 import com.facebook.react.ReactHost

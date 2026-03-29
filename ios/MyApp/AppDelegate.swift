@@ -1,6 +1,7 @@
 import UIKit
 import React
 import ReactNativeNavigation
+import FirebaseCore
 
 @main
 class AppDelegate: RNNAppDelegate {
@@ -8,6 +9,10 @@ class AppDelegate: RNNAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    if FirebaseApp.app() == nil {
+      FirebaseApp.configure()
+    }
+
     self.reactNativeDelegate = ReactNativeDelegate()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

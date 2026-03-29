@@ -1,4 +1,4 @@
-package com.myapp
+package com.nordikhat.conjunto
 
 import com.reactnativenavigation.NavigationActivity
 
