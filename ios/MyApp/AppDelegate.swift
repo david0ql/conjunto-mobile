@@ -22,7 +22,7 @@ class AppDelegate: RNNAppDelegate, PKPushRegistryDelegate {
   }
 
   func pushRegistry(_ registry: PKPushRegistry, didUpdate credentials: PKPushCredentials, for type: PKPushType) {
-    RNVoipPushNotificationManager.didUpdatePushCredentials(credentials, forType: type.rawValue)
+    RNVoipPushNotificationManager.didUpdate(credentials, forType: type.rawValue)
   }
 
   func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {

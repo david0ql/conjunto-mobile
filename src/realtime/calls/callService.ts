@@ -1190,9 +1190,19 @@ class CallService {
     }
 
     if (Platform.OS === 'ios') {
-      try {
-        VoipPushNotification.registerVoipToken();
-      } catch {}
+      if (this.registeredVoipToken) {
+        await this.registerCallPushToken({
+          token: this.registeredVoipToken,
+          channel: 'voip',
+          platform: 'ios',
+          environment: __DEV__ ? 'development' : 'production',
+          deviceId,
+        });
+      } else {
+        try {
+          VoipPushNotification.registerVoipToken();
+        } catch {}
+      }
     }
   }
 
