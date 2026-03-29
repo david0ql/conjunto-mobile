@@ -1,6 +1,9 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import messaging, { type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { AppState, PermissionsAndroid, Platform, type AppStateStatus } from 'react-native';
 import { Navigation } from 'react-native-navigation';
 import InCallManager from 'react-native-incall-manager';
+import VoipPushNotification from 'react-native-voip-push-notification';
 import {
   mediaDevices,
   RTCIceCandidate,
@@ -11,7 +14,14 @@ import {
 import { io, type Socket } from 'socket.io-client';
 import { authStore } from '../../context/auth.store';
 import { COMPONENTS } from '../../navigation/componentNames';
-import { getCallPorters, getCallsIceConfig, REALTIME_URL, type PorterAvailability } from '../../services/api';
+import {
+  getCallPorters,
+  getCallsIceConfig,
+  REALTIME_URL,
+  registerCallDevice,
+  unregisterCallDevice,
+  type PorterAvailability,
+} from '../../services/api';
 import { callNative, CALL_END_REASONS } from './callNative';
 import { callStore } from './callStore';
 import type {
@@ -20,6 +30,22 @@ import type {
   IceConfigResponse,
   RealtimeIceServer,
 } from './types';
+
+type PendingCallRecord = {
+  session: CallSessionPayload;
+  source: 'socket' | 'fcm' | 'voip';
+  persistedAt: number;
+};
+
+type ParsedCallPush = {
+  event: 'incoming' | 'accepted' | 'ended' | 'missed' | 'rejected';
+  callId: string | null;
+  session: CallSessionPayload | null;
+};
+
+const PENDING_CALL_KEY = 'intercom_pending_call';
+const DEVICE_ID_KEY = 'intercom_device_id';
+const PENDING_CALL_TTL_MS = 90_000;
 
 class CallService {
   private socket: Socket | null = null;
@@ -37,6 +63,16 @@ class CallService {
   private appStateSubscription: { remove: () => void } | null = null;
   private bootstrapped = false;
   private micWarmupPromise: Promise<boolean> | null = null;
+  private authBootstrapPromise: Promise<void> | null = null;
+  private restorePendingCallPromise: Promise<void> | null = null;
+  private deviceIdPromise: Promise<string> | null = null;
+  private messageUnsubscribe: (() => void) | null = null;
+  private tokenRefreshUnsubscribe: (() => void) | null = null;
+  private voipListenersBound = false;
+  private deferredAnswerCallId: string | null = null;
+  private deferredEndCallId: string | null = null;
+  private registeredFcmToken: string | null = null;
+  private registeredVoipToken: string | null = null;
 
   bootstrap() {
     if (this.bootstrapped) {
@@ -60,24 +96,42 @@ class CallService {
         console.warn('No fue posible inicializar CallKeep/Notifee', error);
       });
 
+    this.bindPushListeners();
+    void this.restorePendingIncomingCall();
+
     this.appStateSubscription = AppState.addEventListener('change', (nextState) => {
       this.appState = nextState;
       if (nextState === 'active') {
         void this.ensureBackgroundReadiness().catch(() => undefined);
         void this.ensureModalIfNeeded();
+        void this.consumeDeferredSystemActions();
       }
     });
+
+    this.authBootstrapPromise = authStore
+      .init()
+      .then(() => {
+        const token = authStore.getToken();
+        if (token) {
+          this.start(token);
+        }
+      })
+      .catch((error) => {
+        console.warn('No fue posible restaurar la sesión para llamadas', error);
+      });
   }
 
   start(token: string) {
     this.bootstrap();
 
     if (this.socket && this.activeToken === token) {
+      void this.registerPushTokens().catch(() => undefined);
       void this.ensureBackgroundReadiness().catch(() => undefined);
+      void this.consumeDeferredSystemActions();
       return;
     }
 
-    this.stop();
+    this.disconnectRealtime();
     this.activeToken = token;
     this.socket = io(REALTIME_URL, {
       auth: { token },
@@ -86,37 +140,49 @@ class CallService {
     });
 
     this.socket.on('connect', () => {
-      void callNative.showReadyNotification('ready');
+      void this.updateIdleNotification();
+      void this.registerPushTokens().catch((error) => {
+        console.warn('No fue posible registrar los tokens de llamadas', error);
+      });
+      void this.consumeDeferredSystemActions();
     });
+
     this.socket.on('disconnect', () => {
-      if (this.activeToken) {
-        void callNative.showOfflineNotification();
-      }
+      void this.updateIdleNotification();
     });
+
     this.socket.on('calls:outgoing', (session: CallSessionPayload) => {
       void this.handleOutgoing(session);
     });
+
     this.socket.on('calls:incoming', (session: CallSessionPayload) => {
-      void this.handleIncoming(session);
+      void this.handleIncoming(session, 'socket');
     });
+
     this.socket.on('calls:accepted', (session: CallSessionPayload) => {
       void this.handleAccepted(session);
     });
+
     this.socket.on('calls:signal', (event: { callId: string; signal: CallSignalEnvelope }) => {
       void this.handleSignal(event.callId, event.signal);
     });
+
     this.socket.on('calls:ended', (session: CallSessionPayload) => {
       void this.handleTerminal(session);
     });
+
     this.socket.on('calls:missed', (session: CallSessionPayload) => {
       void this.handleTerminal(session);
     });
+
     this.socket.on('calls:rejected', (session: CallSessionPayload) => {
       void this.handleTerminal(session);
     });
+
     this.socket.on('calls:porters-updated', (porters: PorterAvailability[]) => {
       this.setPorters(porters);
     });
+
     this.socket.on('calls:error', (event: { message?: string }) => {
       callStore.patch({
         phase: 'error',
@@ -127,6 +193,7 @@ class CallService {
     });
 
     void this.refreshPorters().catch(() => undefined);
+    void this.registerPushTokens().catch(() => undefined);
     void this.ensureBackgroundReadiness().catch((error) => {
       console.warn('No fue posible preparar el modo segundo plano', error);
     });
@@ -138,15 +205,16 @@ class CallService {
       this.teardownTimer = null;
     }
 
-    this.socket?.removeAllListeners();
-    this.socket?.disconnect();
-    this.socket = null;
+    void this.unregisterPushTokens().catch(() => undefined);
+    this.disconnectRealtime();
     this.activeToken = null;
-
     this.teardownRtc();
     this.stopAudioModes();
+    this.deferredAnswerCallId = null;
+    this.deferredEndCallId = null;
     callStore.reset();
     this.setPorters([]);
+    void this.clearPendingIncomingCall();
     void callNative.teardownSystemState();
     void this.dismissModal();
   }
@@ -174,13 +242,14 @@ class CallService {
   }
 
   async callPorter(employeeId: string) {
-    if (!this.socket || this.socket.disconnected) {
-      throw new Error('El canal en tiempo real no está conectado');
-    }
-
     const current = callStore.getState();
     if (current.phase !== 'idle') {
       throw new Error('Ya existe una llamada en curso');
+    }
+
+    await this.ensureRealtimeReady();
+    if (!this.socket || this.socket.disconnected) {
+      throw new Error('El canal en tiempo real no está conectado');
     }
 
     const hasPermission = await this.ensureMicrophonePermission();
@@ -221,6 +290,7 @@ class CallService {
   }
 
   async acceptCurrentCall(fromSystem = false) {
+    await this.restorePendingIncomingCall();
     const current = callStore.getState();
     if (!current.session) {
       return;
@@ -234,6 +304,7 @@ class CallService {
         startedAt: null,
       });
       await callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
+      await this.clearPendingIncomingCall(current.session.id);
       await this.ensureModalIfNeeded();
       return;
     }
@@ -242,6 +313,8 @@ class CallService {
       if (!fromSystem) {
         await callNative.answerIncomingCall(current.session.id);
       }
+
+      await this.ensureRealtimeReady();
       InCallManager.stopRingtone();
       this.localStream = await mediaDevices.getUserMedia({
         audio: true,
@@ -267,6 +340,7 @@ class CallService {
         error: error instanceof Error ? error.message : 'No fue posible abrir el audio',
         startedAt: null,
       });
+      await callNative.endCall(current.session.id, CALL_END_REASONS.FAILED);
     }
   }
 
@@ -280,10 +354,15 @@ class CallService {
     callStore.patch({ phase: 'ending' });
     this.teardownRtc();
     this.stopAudioModes();
+    void this.clearPendingIncomingCall(current.session.id);
     void callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
-    this.socket?.emit('calls:reject', {
-      callId: current.session.id,
-    });
+    void this.ensureRealtimeReady()
+      .then(() => {
+        this.socket?.emit('calls:reject', {
+          callId: current.session?.id,
+        });
+      })
+      .catch(() => undefined);
   }
 
   endCurrentCall(reason?: string) {
@@ -295,11 +374,16 @@ class CallService {
     callStore.patch({ phase: 'ending' });
     this.teardownRtc();
     this.stopAudioModes();
+    void this.clearPendingIncomingCall(current.session.id);
     void callNative.endCall(current.session.id, CALL_END_REASONS.REMOTE_ENDED);
-    this.socket?.emit('calls:end', {
-      callId: current.session.id,
-      reason,
-    });
+    void this.ensureRealtimeReady()
+      .then(() => {
+        this.socket?.emit('calls:end', {
+          callId: current.session?.id,
+          reason,
+        });
+      })
+      .catch(() => undefined);
   }
 
   toggleMute() {
@@ -324,6 +408,15 @@ class CallService {
     callStore.patch({ speaker: nextSpeaker });
   }
 
+  async handleFirebaseRemoteMessage(remoteMessage: FirebaseMessagingTypes.RemoteMessage | null | undefined) {
+    const parsed = this.parseCallPush(remoteMessage?.data ?? null);
+    if (!parsed) {
+      return;
+    }
+
+    await this.applyPushEvent(parsed, 'fcm');
+  }
+
   private async handleOutgoing(session: CallSessionPayload) {
     if (session.direction !== 'inbound') {
       return;
@@ -346,8 +439,20 @@ class CallService {
     await this.ensureModalIfNeeded();
   }
 
-  private async handleIncoming(session: CallSessionPayload) {
+  private async handleIncoming(
+    session: CallSessionPayload,
+    source: PendingCallRecord['source'],
+    presentSystemCall = true,
+  ) {
     if (session.direction !== 'outbound') {
+      return;
+    }
+
+    const current = callStore.getState();
+    if (
+      current.session?.id === session.id &&
+      ['incoming', 'connecting', 'active', 'ringing'].includes(current.phase)
+    ) {
       return;
     }
 
@@ -356,6 +461,7 @@ class CallService {
       this.teardownTimer = null;
     }
 
+    await this.persistPendingIncomingCall(session, source);
     callStore.setState({
       session,
       phase: 'incoming',
@@ -364,9 +470,17 @@ class CallService {
       error: null,
       startedAt: null,
     });
-    InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
-    await callNative.showIncomingCall(session);
+
+    if (Platform.OS === 'android' && this.appState === 'active') {
+      InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
+    }
+
+    if (presentSystemCall) {
+      await callNative.showIncomingCall(session);
+    }
+
     await this.ensureModalIfNeeded();
+    await this.consumeDeferredSystemActions();
   }
 
   private async handleAccepted(session: CallSessionPayload) {
@@ -420,6 +534,7 @@ class CallService {
     });
     await peer.setLocalDescription(offer);
 
+    await this.ensureRealtimeReady();
     this.socket?.emit('calls:signal', {
       callId: session.id,
       signal: {
@@ -453,6 +568,7 @@ class CallService {
 
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
+      await this.ensureRealtimeReady();
       this.socket?.emit('calls:signal', {
         callId,
         signal: {
@@ -557,13 +673,21 @@ class CallService {
 
   private async handleTerminal(session: CallSessionPayload) {
     const current = callStore.getState();
-    if (current.session?.id && current.session.id !== session.id) {
+    const currentSessionId = current.session?.id ?? null;
+    const persisted = await this.getPersistedPendingIncomingCall();
+
+    if (currentSessionId && currentSessionId !== session.id) {
+      return;
+    }
+
+    if (!currentSessionId && persisted?.session.id !== session.id) {
       return;
     }
 
     InCallManager.stopRingtone();
     this.stopAudioModes();
     this.teardownRtc();
+    await this.clearPendingIncomingCall(session.id);
 
     const reason =
       session.endedReason === 'answered_elsewhere'
@@ -575,12 +699,10 @@ class CallService {
             : 'Llamada finalizada';
 
     await callNative.endCall(session.id, this.mapEndReason(session));
-    if (this.activeToken) {
-      if (this.socket?.connected) {
-        void callNative.showReadyNotification('ready');
-      } else {
-        void callNative.showOfflineNotification();
-      }
+    await this.updateIdleNotification();
+
+    if (!currentSessionId) {
+      return;
     }
 
     callStore.patch({
@@ -599,6 +721,49 @@ class CallService {
       void this.dismissModal();
       this.teardownTimer = null;
     }, 900);
+  }
+
+  private async applyPushEvent(
+    parsed: ParsedCallPush,
+    source: 'fcm' | 'voip',
+  ) {
+    if (parsed.event === 'incoming') {
+      if (!parsed.session) {
+        return;
+      }
+      if (source === 'fcm' && Platform.OS === 'ios') {
+        return;
+      }
+      await this.handleIncoming(parsed.session, source, source !== 'voip');
+      return;
+    }
+
+    if (!parsed.callId || !parsed.session) {
+      return;
+    }
+
+    const current = callStore.getState();
+    const persisted = await this.getPersistedPendingIncomingCall();
+    const matchesCurrent = current.session?.id === parsed.callId;
+    const matchesPersisted = persisted?.session.id === parsed.callId;
+
+    if (parsed.event === 'accepted') {
+      if (matchesCurrent) {
+        await this.handleAccepted(parsed.session);
+        return;
+      }
+
+      if (matchesPersisted) {
+        await this.clearPendingIncomingCall(parsed.callId);
+        await callNative.endCall(parsed.callId, CALL_END_REASONS.ANSWERED_ELSEWHERE);
+        await this.updateIdleNotification();
+      }
+      return;
+    }
+
+    if (matchesCurrent || matchesPersisted) {
+      await this.handleTerminal(parsed.session);
+    }
   }
 
   private async ensureIceServers() {
@@ -664,6 +829,12 @@ class CallService {
     this.localStream = null;
   }
 
+  private disconnectRealtime() {
+    this.socket?.removeAllListeners();
+    this.socket?.disconnect();
+    this.socket = null;
+  }
+
   private async addRemoteIceCandidate(
     peer: RTCPeerConnection,
     candidate: NonNullable<CallSignalEnvelope['candidate']>,
@@ -711,10 +882,63 @@ class CallService {
     this.porterListeners.forEach((listener) => listener(porters));
   }
 
+  private bindPushListeners() {
+    if (!this.messageUnsubscribe) {
+      this.messageUnsubscribe = messaging().onMessage((remoteMessage) => {
+        void this.handleFirebaseRemoteMessage(remoteMessage);
+      });
+    }
+
+    if (!this.tokenRefreshUnsubscribe) {
+      this.tokenRefreshUnsubscribe = messaging().onTokenRefresh((token) => {
+        this.registeredFcmToken = token;
+        void this.registerCallPushToken({
+          token,
+          channel: 'fcm',
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+        }).catch(() => undefined);
+      });
+    }
+
+    if (Platform.OS !== 'ios' || this.voipListenersBound) {
+      return;
+    }
+
+    VoipPushNotification.addEventListener('register', (token: string) => {
+      this.registeredVoipToken = token;
+      void this.registerCallPushToken({
+        token,
+        channel: 'voip',
+        platform: 'ios',
+        environment: __DEV__ ? 'development' : 'production',
+      }).catch(() => undefined);
+    });
+
+    VoipPushNotification.addEventListener('notification', (notification: object) => {
+      void this.handleVoipNotification(notification as Record<string, unknown>);
+    });
+
+    VoipPushNotification.addEventListener('didLoadWithEvents', (events: Array<{ name: string; data: any }>) => {
+      void this.handleVoipDidLoadEvents(events);
+    });
+
+    VoipPushNotification.registerVoipToken();
+    this.voipListenersBound = true;
+  }
+
   private async ensureBackgroundReadiness() {
     await callNative.ensureReadinessPermissions();
     if (this.appState === 'active') {
       await this.ensureMicrophonePermission(true);
+    }
+
+    await this.updateIdleNotification();
+  }
+
+  private async updateIdleNotification() {
+    const current = callStore.getState();
+    if (!this.activeToken || current.phase === 'incoming' || current.phase === 'connecting' || current.phase === 'active' || current.phase === 'ringing') {
+      return;
     }
 
     if (this.socket?.connected) {
@@ -725,26 +949,51 @@ class CallService {
   }
 
   private async handleSystemAnswer(callId: string) {
+    await this.restorePendingIncomingCall();
     const current = callStore.getState();
     if (current.session?.id !== callId) {
+      this.deferredAnswerCallId = callId;
+      await this.ensureRealtimeReady().catch(() => undefined);
       return;
     }
 
+    this.deferredAnswerCallId = null;
     await this.acceptCurrentCall(true);
   }
 
   private async handleSystemEnd(callId: string) {
+    await this.restorePendingIncomingCall();
     const current = callStore.getState();
     if (current.session?.id !== callId) {
+      this.deferredEndCallId = callId;
       return;
     }
 
+    this.deferredEndCallId = null;
     if (current.phase === 'incoming') {
       this.rejectCurrentCall();
       return;
     }
 
     this.endCurrentCall();
+  }
+
+  private async consumeDeferredSystemActions() {
+    const current = callStore.getState();
+    if (!current.session) {
+      return;
+    }
+
+    if (this.deferredEndCallId === current.session.id) {
+      this.deferredEndCallId = null;
+      await this.handleSystemEnd(current.session.id);
+      return;
+    }
+
+    if (this.deferredAnswerCallId === current.session.id) {
+      this.deferredAnswerCallId = null;
+      await this.acceptCurrentCall(true);
+    }
   }
 
   private async handleOpenCallUi() {
@@ -815,6 +1064,324 @@ class CallService {
       return CALL_END_REASONS.UNANSWERED;
     }
     return CALL_END_REASONS.REMOTE_ENDED;
+  }
+
+  private async ensureRealtimeReady() {
+    if (!this.activeToken) {
+      if (this.authBootstrapPromise) {
+        await this.authBootstrapPromise;
+      } else {
+        await authStore.init();
+      }
+      const token = authStore.getToken();
+      if (token) {
+        this.start(token);
+      }
+    }
+
+    if (!this.socket && this.activeToken) {
+      this.start(this.activeToken);
+    }
+
+    const socket = this.socket;
+    if (!socket) {
+      throw new Error('No hay una sesión autenticada para responder la llamada');
+    }
+
+    if (socket.connected) {
+      return;
+    }
+
+    socket.connect();
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('El canal en tiempo real tardó demasiado en reconectar'));
+      }, 12_000);
+
+      const onConnect = () => {
+        cleanup();
+        resolve();
+      };
+
+      const onError = (error: unknown) => {
+        cleanup();
+        reject(error instanceof Error ? error : new Error('No fue posible reconectar el socket'));
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        socket.off('connect', onConnect);
+        socket.off('connect_error', onError as any);
+      };
+
+      socket.on('connect', onConnect);
+      socket.on('connect_error', onError as any);
+    });
+  }
+
+  private async unregisterPushTokens() {
+    if (!this.activeToken) {
+      return;
+    }
+
+    const deviceId = await this.getDeviceId().catch(() => null);
+    const unregisterJobs: Array<Promise<unknown>> = [];
+
+    if (this.registeredFcmToken) {
+      unregisterJobs.push(
+        unregisterCallDevice({
+          token: this.registeredFcmToken,
+          channel: 'fcm',
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+          deviceId,
+        }),
+      );
+    }
+
+    if (Platform.OS === 'ios' && this.registeredVoipToken) {
+      unregisterJobs.push(
+        unregisterCallDevice({
+          token: this.registeredVoipToken,
+          channel: 'voip',
+          platform: 'ios',
+          deviceId,
+        }),
+      );
+    }
+
+    if (unregisterJobs.length === 0 && deviceId) {
+      unregisterJobs.push(unregisterCallDevice({ deviceId }));
+    }
+
+    if (unregisterJobs.length === 0) {
+      return;
+    }
+
+    await Promise.allSettled(unregisterJobs);
+  }
+
+  private async registerPushTokens() {
+    if (!this.activeToken) {
+      return;
+    }
+
+    const deviceId = await this.getDeviceId();
+
+    try {
+      if (Platform.OS === 'ios') {
+        await messaging().registerDeviceForRemoteMessages();
+      }
+    } catch {}
+
+    try {
+      const token = await messaging().getToken();
+      if (token) {
+        this.registeredFcmToken = token;
+        await this.registerCallPushToken({
+          token,
+          channel: 'fcm',
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+          deviceId,
+        });
+      }
+    } catch (error) {
+      console.warn('No fue posible obtener el token FCM', error);
+    }
+
+    if (Platform.OS === 'ios') {
+      try {
+        VoipPushNotification.registerVoipToken();
+      } catch {}
+    }
+  }
+
+  private async registerCallPushToken(input: {
+    token: string;
+    platform: 'android' | 'ios';
+    channel: 'fcm' | 'voip';
+    environment?: 'development' | 'production' | null;
+    deviceId?: string | null;
+  }) {
+    if (!this.activeToken || !input.token) {
+      return;
+    }
+
+    const deviceId = input.deviceId ?? (await this.getDeviceId());
+    await registerCallDevice({
+      token: input.token,
+      platform: input.platform,
+      channel: input.channel,
+      environment: input.environment ?? null,
+      deviceId,
+      appVersion: null,
+    });
+  }
+
+  private async handleVoipToken(token: string) {
+    if (!token) {
+      return;
+    }
+
+    this.registeredVoipToken = token;
+    await this.registerCallPushToken({
+      token,
+      channel: 'voip',
+      platform: 'ios',
+      environment: __DEV__ ? 'development' : 'production',
+    });
+  }
+
+  private async handleVoipDidLoadEvents(events: Array<{ name: string; data: any }> | null | undefined) {
+    if (!Array.isArray(events)) {
+      return;
+    }
+
+    for (const event of events) {
+      if (event?.name === 'RNVoipPushRemoteNotificationsRegisteredEvent' && typeof event.data === 'string') {
+        await this.handleVoipToken(event.data);
+      }
+
+      if (event?.name === 'RNVoipPushRemoteNotificationReceivedEvent' && event.data) {
+        await this.handleVoipNotification(event.data);
+      }
+    }
+  }
+
+  private async handleVoipNotification(notification: Record<string, unknown>) {
+    const parsed = this.parseCallPush(notification);
+    if (!parsed) {
+      return;
+    }
+
+    await this.applyPushEvent(parsed, 'voip');
+  }
+
+  private parseCallPush(data: Record<string, unknown> | null): ParsedCallPush | null {
+    if (!data) {
+      return null;
+    }
+
+    const kind = this.getStringField(data, 'kind');
+    const event = this.getStringField(data, 'event');
+    if (kind !== 'call' || !event || !['incoming', 'accepted', 'ended', 'missed', 'rejected'].includes(event)) {
+      return null;
+    }
+
+    const sessionValue = data.session;
+    let session: CallSessionPayload | null = null;
+    if (typeof sessionValue === 'string') {
+      try {
+        session = JSON.parse(sessionValue) as CallSessionPayload;
+      } catch {
+        session = null;
+      }
+    } else if (sessionValue && typeof sessionValue === 'object') {
+      session = sessionValue as CallSessionPayload;
+    }
+
+    const callId = this.getStringField(data, 'callId') ?? session?.id ?? null;
+    return {
+      event: event as ParsedCallPush['event'],
+      callId,
+      session,
+    };
+  }
+
+  private getStringField(data: Record<string, unknown>, key: string) {
+    const value = data[key];
+    return typeof value === 'string' && value.trim() ? value : null;
+  }
+
+  private async restorePendingIncomingCall() {
+    if (this.restorePendingCallPromise) {
+      return this.restorePendingCallPromise;
+    }
+
+    this.restorePendingCallPromise = (async () => {
+      const current = callStore.getState();
+      if (current.session) {
+        return;
+      }
+
+      const pending = await this.getPersistedPendingIncomingCall();
+      if (!pending) {
+        return;
+      }
+
+      callStore.setState({
+        session: pending.session,
+        phase: 'incoming',
+        muted: false,
+        speaker: true,
+        error: null,
+        startedAt: null,
+      });
+      await this.ensureModalIfNeeded();
+    })().finally(() => {
+      this.restorePendingCallPromise = null;
+    });
+
+    return this.restorePendingCallPromise;
+  }
+
+  private async persistPendingIncomingCall(session: CallSessionPayload, source: PendingCallRecord['source']) {
+    const record: PendingCallRecord = {
+      session,
+      source,
+      persistedAt: Date.now(),
+    };
+    await AsyncStorage.setItem(PENDING_CALL_KEY, JSON.stringify(record));
+  }
+
+  private async getPersistedPendingIncomingCall(): Promise<PendingCallRecord | null> {
+    try {
+      const raw = await AsyncStorage.getItem(PENDING_CALL_KEY);
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw) as PendingCallRecord;
+      if (!parsed?.session?.id || typeof parsed.persistedAt !== 'number') {
+        await AsyncStorage.removeItem(PENDING_CALL_KEY);
+        return null;
+      }
+
+      if (Date.now() - parsed.persistedAt > PENDING_CALL_TTL_MS) {
+        await AsyncStorage.removeItem(PENDING_CALL_KEY);
+        return null;
+      }
+
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private async clearPendingIncomingCall(callId?: string) {
+    const pending = await this.getPersistedPendingIncomingCall();
+    if (!callId || pending?.session.id === callId) {
+      await AsyncStorage.removeItem(PENDING_CALL_KEY);
+    }
+  }
+
+  private async getDeviceId() {
+    if (this.deviceIdPromise) {
+      return this.deviceIdPromise;
+    }
+
+    this.deviceIdPromise = (async () => {
+      const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
+      if (existing) {
+        return existing;
+      }
+
+      const next = `${Platform.OS}-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+      await AsyncStorage.setItem(DEVICE_ID_KEY, next);
+      return next;
+    })();
+
+    return this.deviceIdPromise;
   }
 }
 

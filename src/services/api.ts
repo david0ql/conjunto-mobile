@@ -142,7 +142,36 @@ export interface PorterAvailability {
   name: string;
   lastName: string;
   available: boolean;
+  status?: 'available' | 'busy';
+  currentCall?: {
+    callId: string;
+    direction: 'outbound' | 'inbound' | 'internal';
+    status: 'ringing' | 'active';
+    withType: 'resident' | 'employee' | 'apartment';
+    withLabel: string;
+    apartment: {
+      id: string;
+      number: string;
+      floor: number | null;
+      tower: { id: string; code: string; name: string } | null;
+    } | null;
+  } | null;
 }
+
+
+export interface RegisterCallDeviceInput {
+  token: string;
+  platform: 'android' | 'ios';
+  channel: 'fcm' | 'voip';
+  environment?: 'development' | 'production' | null;
+  deviceId?: string | null;
+  appVersion?: string | null;
+}
+
+export interface CallDeviceRegistrationResult {
+  ok: boolean;
+}
+
 
 // ─── HTTP client ──────────────────────────────────────────────────────────────
 
@@ -283,6 +312,14 @@ export async function getCallsIceConfig(): Promise<CallsIceConfigResponse> {
 
 export async function getCallPorters(): Promise<PorterAvailability[]> {
   return request<PorterAvailability[]>('GET', '/calls/porters');
+}
+
+export async function registerCallDevice(payload: RegisterCallDeviceInput): Promise<CallDeviceRegistrationResult> {
+  return request<CallDeviceRegistrationResult>('POST', '/calls/devices', payload);
+}
+
+export async function unregisterCallDevice(payload: Partial<RegisterCallDeviceInput> & { deviceId?: string | null } = {}): Promise<CallDeviceRegistrationResult> {
+  return request<CallDeviceRegistrationResult>('POST', '/calls/devices/unregister', payload);
 }
 
 // ─── Assemblies ───────────────────────────────────────────────────────────────
