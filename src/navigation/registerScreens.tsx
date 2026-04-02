@@ -11,7 +11,6 @@ import { ZoneDetailScreen } from '../screens/ZoneDetailScreen';
 import { PorteriaLogScreen } from '../screens/PorteriaLogScreen';
 import { CreateReservationScreen } from '../screens/CreateReservationScreen';
 import { ProfileQrScreen } from '../screens/ProfileQrScreen';
-import { IntercomCallScreen } from '../screens/IntercomCallScreen';
 import { AssemblyVotingScreen } from '../screens/AssemblyVotingScreen';
 
 function withSafeArea<P extends object>(Component: React.ComponentType<P>): React.ComponentType<P> {
@@ -32,6 +31,5 @@ export function registerScreens() {
   Navigation.registerComponent(COMPONENTS.porteriaLog, () => withSafeArea(PorteriaLogScreen));
   Navigation.registerComponent(COMPONENTS.createReservation, () => withSafeArea(CreateReservationScreen));
   Navigation.registerComponent(COMPONENTS.profileQr, () => withSafeArea(ProfileQrScreen));
-  Navigation.registerComponent(COMPONENTS.intercomCall, () => withSafeArea(IntercomCallScreen));
   Navigation.registerComponent(COMPONENTS.assemblyVoting, () => withSafeArea(AssemblyVotingScreen));
 }

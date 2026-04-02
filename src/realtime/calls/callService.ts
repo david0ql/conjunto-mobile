@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import messaging, { type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { AppState, PermissionsAndroid, Platform, type AppStateStatus } from 'react-native';
-import { Navigation } from 'react-native-navigation';
 import InCallManager from 'react-native-incall-manager';
 import VoipPushNotification from 'react-native-voip-push-notification';
 import {
@@ -13,7 +12,6 @@ import {
 } from 'react-native-webrtc';
 import { io, type Socket } from 'socket.io-client';
 import { authStore } from '../../context/auth.store';
-import { COMPONENTS } from '../../navigation/componentNames';
 import {
   getCallPorters,
   getCallsIceConfig,
@@ -49,12 +47,10 @@ const PENDING_CALL_TTL_MS = 90_000;
 
 class CallService {
   private socket: Socket | null = null;
-  private modalId: string | null = null;
   private peer: RTCPeerConnection | null = null;
   private localStream: MediaStream | null = null;
   private iceServers: RealtimeIceServer[] | null = null;
   private activeToken: string | null = null;
-  private teardownTimer: ReturnType<typeof setTimeout> | null = null;
   private peerCallId: string | null = null;
   private pendingRemoteCandidates: NonNullable<CallSignalEnvelope['candidate']>[] = [];
   private porters: PorterAvailability[] = [];
@@ -62,6 +58,7 @@ class CallService {
   private appState: AppStateStatus = AppState.currentState;
   private appStateSubscription: { remove: () => void } | null = null;
   private bootstrapped = false;
+  private permissionsRequested = false;
   private micWarmupPromise: Promise<boolean> | null = null;
   private authBootstrapPromise: Promise<void> | null = null;
   private restorePendingCallPromise: Promise<void> | null = null;
@@ -102,8 +99,7 @@ class CallService {
     this.appStateSubscription = AppState.addEventListener('change', (nextState) => {
       this.appState = nextState;
       if (nextState === 'active') {
-        void this.ensureBackgroundReadiness().catch(() => undefined);
-        void this.ensureModalIfNeeded();
+        void this.updateIdleNotification().catch(() => undefined);
         void this.consumeDeferredSystemActions();
       }
     });
@@ -183,13 +179,8 @@ class CallService {
       this.setPorters(porters);
     });
 
-    this.socket.on('calls:error', (event: { message?: string }) => {
-      callStore.patch({
-        phase: 'error',
-        error: event.message ?? 'No fue posible operar la llamada',
-        startedAt: null,
-      });
-      void this.ensureModalIfNeeded();
+    this.socket.on('calls:error', () => {
+      callStore.reset();
     });
 
     void this.refreshPorters().catch(() => undefined);
@@ -200,11 +191,6 @@ class CallService {
   }
 
   stop() {
-    if (this.teardownTimer) {
-      clearTimeout(this.teardownTimer);
-      this.teardownTimer = null;
-    }
-
     void this.unregisterPushTokens().catch(() => undefined);
     this.disconnectRealtime();
     this.activeToken = null;
@@ -216,7 +202,6 @@ class CallService {
     this.setPorters([]);
     void this.clearPendingIncomingCall();
     void callNative.teardownSystemState();
-    void this.dismissModal();
   }
 
   getCurrentPorters() {
@@ -265,7 +250,6 @@ class CallService {
       error: null,
       startedAt: null,
     });
-    await this.ensureModalIfNeeded();
 
     try {
       this.localStream = await mediaDevices.getUserMedia({
@@ -280,11 +264,7 @@ class CallService {
     } catch (error) {
       this.stopAudioModes();
       this.teardownRtc();
-      callStore.patch({
-        phase: 'error',
-        error: error instanceof Error ? error.message : 'No fue posible iniciar la llamada',
-        startedAt: null,
-      });
+      callStore.reset();
       throw error;
     }
   }
@@ -298,14 +278,9 @@ class CallService {
 
     const hasPermission = await this.ensureMicrophonePermission();
     if (!hasPermission) {
-      callStore.patch({
-        phase: 'error',
-        error: 'Debes habilitar el micrófono para contestar la llamada',
-        startedAt: null,
-      });
       await callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
       await this.clearPendingIncomingCall(current.session.id);
-      await this.ensureModalIfNeeded();
+      callStore.reset();
       return;
     }
 
@@ -333,14 +308,9 @@ class CallService {
       this.socket?.emit('calls:accept', {
         callId: current.session.id,
       });
-      await this.ensureModalIfNeeded(true);
     } catch (error) {
-      callStore.patch({
-        phase: 'error',
-        error: error instanceof Error ? error.message : 'No fue posible abrir el audio',
-        startedAt: null,
-      });
       await callNative.endCall(current.session.id, CALL_END_REASONS.FAILED);
+      callStore.reset();
     }
   }
 
@@ -386,28 +356,6 @@ class CallService {
       .catch(() => undefined);
   }
 
-  toggleMute() {
-    const current = callStore.getState();
-    const nextMuted = !current.muted;
-    this.localStream?.getAudioTracks().forEach((track) => {
-      track.enabled = !nextMuted;
-    });
-    if (current.session) {
-      void callNative.syncMuted(current.session.id, nextMuted);
-    }
-    callStore.patch({ muted: nextMuted });
-  }
-
-  toggleSpeaker() {
-    const current = callStore.getState();
-    const nextSpeaker = !current.speaker;
-    InCallManager.setForceSpeakerphoneOn(nextSpeaker);
-    if (current.session) {
-      void callNative.syncSpeaker(current.session.id, nextSpeaker);
-    }
-    callStore.patch({ speaker: nextSpeaker });
-  }
-
   async handleFirebaseRemoteMessage(remoteMessage: FirebaseMessagingTypes.RemoteMessage | null | undefined) {
     const parsed = this.parseCallPush(remoteMessage?.data ?? null);
     if (!parsed) {
@@ -422,11 +370,6 @@ class CallService {
       return;
     }
 
-    if (this.teardownTimer) {
-      clearTimeout(this.teardownTimer);
-      this.teardownTimer = null;
-    }
-
     await callNative.startOutgoingCall(session);
     callStore.patch({
       session,
@@ -436,7 +379,6 @@ class CallService {
       error: null,
       startedAt: null,
     });
-    await this.ensureModalIfNeeded();
   }
 
   private async handleIncoming(
@@ -454,11 +396,6 @@ class CallService {
       ['incoming', 'connecting', 'active', 'ringing'].includes(current.phase)
     ) {
       return;
-    }
-
-    if (this.teardownTimer) {
-      clearTimeout(this.teardownTimer);
-      this.teardownTimer = null;
     }
 
     await this.persistPendingIncomingCall(session, source);
@@ -479,7 +416,6 @@ class CallService {
       await callNative.showIncomingCall(session);
     }
 
-    await this.ensureModalIfNeeded();
     await this.consumeDeferredSystemActions();
   }
 
@@ -504,7 +440,6 @@ class CallService {
         startedAt,
       });
       await callNative.markCallConnecting(session, startedAt);
-      await this.ensureModalIfNeeded();
       return;
     }
 
@@ -519,7 +454,6 @@ class CallService {
       startedAt,
     });
     await callNative.markCallConnecting(session, startedAt);
-    await this.ensureModalIfNeeded();
     await this.startOfferForCall(session);
   }
 
@@ -705,22 +639,7 @@ class CallService {
       return;
     }
 
-    callStore.patch({
-      session,
-      phase: 'ended',
-      error: reason,
-      startedAt: null,
-    });
-    await this.ensureModalIfNeeded();
-
-    if (this.teardownTimer) {
-      clearTimeout(this.teardownTimer);
-    }
-    this.teardownTimer = setTimeout(() => {
-      callStore.reset();
-      void this.dismissModal();
-      this.teardownTimer = null;
-    }, 900);
+    callStore.reset();
   }
 
   private async applyPushEvent(
@@ -927,9 +846,9 @@ class CallService {
   }
 
   private async ensureBackgroundReadiness() {
-    await callNative.ensureReadinessPermissions();
-    if (this.appState === 'active') {
-      await this.ensureMicrophonePermission(true);
+    if (!this.permissionsRequested) {
+      this.permissionsRequested = true;
+      await callNative.ensureReadinessPermissions();
     }
 
     await this.updateIdleNotification();
@@ -998,55 +917,6 @@ class CallService {
 
   private async handleOpenCallUi() {
     await callNative.bringAppToFront();
-    await this.ensureModalIfNeeded(true);
-  }
-
-  private async ensureModalIfNeeded(forceForeground = false) {
-    const current = callStore.getState();
-    if (current.phase === 'idle') {
-      return;
-    }
-
-    if (forceForeground) {
-      await callNative.bringAppToFront();
-    }
-
-    if (this.appState !== 'active') {
-      return;
-    }
-
-    await this.ensureModal();
-  }
-
-  private async ensureModal() {
-    if (this.modalId) {
-      return this.modalId;
-    }
-
-    this.modalId = await Navigation.showModal({
-      stack: {
-        children: [
-          {
-            component: {
-              name: COMPONENTS.intercomCall,
-            },
-          },
-        ],
-      },
-    } as any);
-
-    return this.modalId;
-  }
-
-  private async dismissModal() {
-    if (!this.modalId) {
-      return;
-    }
-
-    try {
-      await Navigation.dismissModal(this.modalId);
-    } catch {}
-    this.modalId = null;
   }
 
   private getSessionStartedAt(session: CallSessionPayload) {
@@ -1327,7 +1197,6 @@ class CallService {
         error: null,
         startedAt: null,
       });
-      await this.ensureModalIfNeeded();
     })().finally(() => {
       this.restorePendingCallPromise = null;
     });

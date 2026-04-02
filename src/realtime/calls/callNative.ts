@@ -63,25 +63,35 @@ const CALLKEEP_OPTIONS = {
 
 class CallNativeManager {
   private initialized = false;
+  private initializePromise: Promise<void> | null = null;
   private listenersBound = false;
   private foregroundServiceRegistered = false;
   private handlers: CallNativeHandlers | null = null;
   private pendingActions: NativeAction[] = [];
   private backgroundServiceResolver: (() => void) | null = null;
+  private hasPromptedBatteryOptimization = false;
+  private hasPromptedPhoneAccount = false;
 
   async initialize(handlers: CallNativeHandlers) {
     this.handlers = handlers;
 
     if (!this.initialized) {
-      await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
-      RNCallKeep.setReachable();
-      await this.ensureChannels();
-      this.registerForegroundService();
-      this.bindListeners();
-      this.initialized = true;
+      if (!this.initializePromise) {
+        this.initializePromise = this.doInitialize();
+      }
+      await this.initializePromise;
     }
 
     await this.flushPendingActions();
+  }
+
+  private async doInitialize() {
+    await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
+    RNCallKeep.setReachable();
+    await this.ensureChannels();
+    this.registerForegroundService();
+    this.bindListeners();
+    this.initialized = true;
   }
 
   async ensureReadinessPermissions() {
@@ -309,9 +319,14 @@ class CallNativeManager {
   }
 
   private async ensureInitialized() {
-    if (!this.initialized) {
-      throw new Error('callNative.initialize must run before using native call controls');
+    if (this.initialized) {
+      return;
     }
+    if (this.initializePromise) {
+      await this.initializePromise;
+      return;
+    }
+    throw new Error('callNative.initialize must run before using native call controls');
   }
 
   private async ensureChannels() {
@@ -465,7 +480,7 @@ class CallNativeManager {
   }
 
   private async maybePromptBatteryOptimization() {
-    if (AppState.currentState !== 'active') {
+    if (this.hasPromptedBatteryOptimization || AppState.currentState !== 'active') {
       return;
     }
 
@@ -474,6 +489,7 @@ class CallNativeManager {
       return;
     }
 
+    this.hasPromptedBatteryOptimization = true;
     Alert.alert(
       'Permite segundo plano',
       'Android está optimizando batería y puede cerrar la escucha de portería. Desactiva esa optimización para no perder llamadas.',
@@ -490,7 +506,7 @@ class CallNativeManager {
   }
 
   private async maybePromptPhoneAccount() {
-    if (Platform.OS !== 'android' || AppState.currentState !== 'active') {
+    if (this.hasPromptedPhoneAccount || Platform.OS !== 'android' || AppState.currentState !== 'active') {
       return;
     }
 
@@ -503,6 +519,7 @@ class CallNativeManager {
       return;
     }
 
+    this.hasPromptedPhoneAccount = true;
     Alert.alert(
       'Activa llamadas del sistema',
       'Para que la llamada entrante aparezca como una llamada real, acepta el servicio de llamadas del intercom cuando Android lo pida.',

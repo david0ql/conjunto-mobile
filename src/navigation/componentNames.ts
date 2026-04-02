@@ -8,7 +8,6 @@ export const COMPONENTS = {
   porteriaLog: 'app.porteriaLog',
   createReservation: 'app.createReservation',
   profileQr: 'app.profileQr',
-  intercomCall: 'app.intercomCall',
   assemblyVoting: 'app.assemblyVoting',
 } as const;
 
