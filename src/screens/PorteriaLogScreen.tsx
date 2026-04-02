@@ -23,11 +23,14 @@ import {
   getMyPackages,
   getMyAccessEntries,
   getMyApartments,
+  getMyNotifications,
   getPackagePhotos,
+  markNotificationRead,
   resolveImageUrl,
   type PackageItem,
   type PackagePhoto,
   type AccessEntry,
+  type NotificationItem,
   type ResidentApartment,
   type PorterAvailability,
 } from '../services/api';
@@ -116,16 +119,19 @@ function PackagePhotosModal({
 
 export function PorteriaLogScreen() {
   const callState = useSyncExternalStore(callStore.subscribe, callStore.getState);
-  const [activeTab, setActiveTab] = useState<'packages' | 'entries'>('packages');
+  const [activeTab, setActiveTab] = useState<'packages' | 'entries' | 'notifications'>('packages');
   const [porters, setPorters] = useState<PorterAvailability[]>([]);
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [entries, setEntries] = useState<AccessEntry[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [apartments, setApartments] = useState<ResidentApartment[]>([]);
   const [loadingPorters, setLoadingPorters] = useState(true);
   const [portersError, setPortersError] = useState<string | null>(null);
   const [selectedAptIdx, setSelectedAptIdx] = useState(0);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPkg, setSelectedPkg] = useState<PackageItem | null>(null);
 
@@ -162,6 +168,14 @@ export function PorteriaLogScreen() {
       .finally(() => setLoadingEntries(false));
   }
 
+  function fetchNotifications() {
+    setLoadingNotifications(true);
+    getMyNotifications()
+      .then(setNotifications)
+      .catch(() => {})
+      .finally(() => setLoadingNotifications(false));
+  }
+
   function handleRefresh() {
     setRefreshing(true);
     const fetches = [
@@ -178,6 +192,7 @@ export function PorteriaLogScreen() {
         }),
     ];
     if (activeTab === 'entries') fetches.push(getMyAccessEntries(selectedAptId).then(setEntries).catch(() => {}));
+    if (activeTab === 'notifications') fetches.push(getMyNotifications().then(setNotifications).catch(() => {}));
     Promise.all(fetches).finally(() => setRefreshing(false));
   }
 
@@ -196,6 +211,7 @@ export function PorteriaLogScreen() {
 
   useEffect(() => {
     if (activeTab === 'entries') fetchEntries(selectedAptId);
+    if (activeTab === 'notifications') fetchNotifications();
   }, [activeTab, selectedAptId]);
 
   const pendingPackages = packages.filter((p) => !p.delivered);
@@ -211,6 +227,20 @@ export function PorteriaLogScreen() {
       );
     }
   }
+
+  async function handlePressNotification(item: NotificationItem) {
+    if (item.isRead || markingNotificationId) return;
+    setMarkingNotificationId(item.id);
+    try {
+      const updated = await markNotificationRead(item.id);
+      setNotifications((current) => current.map((notif) => (notif.id === updated.id ? updated : notif)));
+    } catch {
+    } finally {
+      setMarkingNotificationId(null);
+    }
+  }
+
+  const unreadNotifications = notifications.filter((n) => !n.isRead).length;
 
   return (
     <NoirScreen onRefresh={handleRefresh} refreshing={refreshing}>
@@ -283,6 +313,9 @@ export function PorteriaLogScreen() {
           </Pressable>
           <Pressable onPress={() => setActiveTab('entries')} style={styles.tabPill}>
             <Text style={activeTab === 'entries' ? styles.tabActive : styles.tab}>Ingresos</Text>
+          </Pressable>
+          <Pressable onPress={() => setActiveTab('notifications')} style={styles.tabPill}>
+            <Text style={activeTab === 'notifications' ? styles.tabActive : styles.tab}>Notificaciones</Text>
           </Pressable>
         </View>
 
@@ -430,6 +463,75 @@ export function PorteriaLogScreen() {
                 );
               })
             )}
+          </View>
+        ) : null}
+
+        {activeTab === 'notifications' ? (
+          <View style={styles.visitorsSection}>
+            <View style={styles.visitorsHeader}>
+              <Text style={styles.visitorsTitle}>Últimas notificaciones</Text>
+            </View>
+
+            {loadingNotifications ? (
+              [0, 1, 2].map((i) => <View key={i} style={[styles.skeleton, { height: 100 }]} />)
+            ) : notifications.length === 0 ? (
+              <Text style={styles.emptyText}>No tienes notificaciones registradas.</Text>
+            ) : (
+              notifications.map((item) => {
+                const isUnread = !item.isRead;
+                const towerName =
+                  item.apartment?.towerData?.name ??
+                  (item.apartment?.tower ? `Torre ${item.apartment.tower}` : 'Torre');
+                const aptNumber = item.apartment?.number ?? '—';
+                const isMarking = markingNotificationId === item.id;
+
+                return (
+                  <Pressable
+                    key={item.id}
+                    disabled={!isUnread || isMarking}
+                    onPress={() => void handlePressNotification(item)}
+                    style={[styles.notificationCard, isUnread ? styles.notificationCardUnread : styles.notificationCardRead]}>
+                    <View style={styles.notificationTop}>
+                      <Text style={styles.notificationType}>
+                        {item.notificationType?.name ?? 'Notificación'}
+                      </Text>
+                      <Text style={[styles.notificationStatus, isUnread && styles.notificationStatusUnread]}>
+                        {isMarking ? 'Leyendo...' : isUnread ? 'Nueva' : 'Leída'}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.notificationMessage}>{item.message}</Text>
+
+                    <View style={styles.notificationBottom}>
+                      <Text style={styles.notificationMeta}>
+                        {towerName} · Apt. {aptNumber}
+                      </Text>
+                      <Text style={styles.notificationMeta}>
+                        {new Date(item.createdAt).toLocaleDateString('es-CO', {
+                          day: 'numeric',
+                          month: 'short',
+                        })}{' '}
+                        ·{' '}
+                        {new Date(item.createdAt).toLocaleTimeString('es-CO', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
+
+            <View style={styles.whiteCard}>
+              <Eyebrow style={styles.whiteEyebrow}>Resumen</Eyebrow>
+              <Text style={styles.whiteTitle}>
+                {unreadNotifications === 1
+                  ? '1 notificación pendiente'
+                  : `${unreadNotifications} notificaciones pendientes`}
+              </Text>
+              <Text style={styles.whiteLink}>Toca una notificación nueva para marcarla como leída</Text>
+            </View>
           </View>
         ) : null}
       </View>
@@ -807,6 +909,61 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  notificationCard: {
+    minHeight: 100,
+    padding: 16,
+    gap: 10,
+  },
+  notificationCardUnread: {
+    backgroundColor: noirTheme.surfaceHigh,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  notificationCardRead: {
+    backgroundColor: noirTheme.surfaceLow,
+  },
+  notificationTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    alignItems: 'center',
+  },
+  notificationType: {
+    color: noirTheme.primary,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    flex: 1,
+  },
+  notificationStatus: {
+    color: noirTheme.secondary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+  },
+  notificationStatusUnread: {
+    color: noirTheme.primary,
+  },
+  notificationMessage: {
+    color: noirTheme.primary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  notificationBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  notificationMeta: {
+    color: noirTheme.secondary,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.1,
     textTransform: 'uppercase',
   },
 });

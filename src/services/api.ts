@@ -72,6 +72,27 @@ export interface Reservation {
   status?: ReservationStatus;
 }
 
+export interface NotificationItem {
+  id: string;
+  apartmentId?: string | null;
+  residentId?: string | null;
+  notificationTypeId: string;
+  message: string;
+  isRead: boolean;
+  createdAt: string;
+  apartment?: {
+    id: string;
+    number: string;
+    tower?: string | null;
+    towerData?: { id: string; code: string; name: string } | null;
+  } | null;
+  notificationType?: {
+    id: string;
+    code?: string;
+    name: string;
+  } | null;
+}
+
 export interface PackageItem {
   id: string;
   description?: string | null;
@@ -260,6 +281,14 @@ export async function createReservation(payload: {
   notesByResident?: string;
 }): Promise<Reservation> {
   return request<Reservation>('POST', '/reservations', payload);
+}
+
+export async function getMyNotifications(): Promise<NotificationItem[]> {
+  return request<NotificationItem[]>('GET', '/notifications/my');
+}
+
+export async function markNotificationRead(id: string): Promise<NotificationItem> {
+  return request<NotificationItem>('PATCH', `/notifications/${id}/read`);
 }
 
 // ─── Packages ─────────────────────────────────────────────────────────────────
