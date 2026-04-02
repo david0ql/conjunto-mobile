@@ -5,6 +5,7 @@ import notifee, {
   AndroidImportance,
   AndroidVisibility,
   AuthorizationStatus,
+  type Event as NotifeeEvent,
   EventType,
 } from '@notifee/react-native';
 import RNCallKeep, {
@@ -28,6 +29,10 @@ export interface CallNativeHandlers {
 const READY_CHANNEL_ID = 'intercom-ready';
 const CALL_CHANNEL_ID = 'intercom-live';
 const SERVICE_NOTIFICATION_ID = 'intercom-service';
+const INCOMING_FALLBACK_NOTIFICATION_PREFIX = 'incoming-';
+const ACTION_OPEN_CALL = 'open-call';
+const ACTION_ANSWER_CALL = 'answer-call';
+const ACTION_REJECT_CALL = 'reject-call';
 
 const CALLKEEP_OPTIONS = {
   ios: {
@@ -71,6 +76,7 @@ class CallNativeManager {
   private backgroundServiceResolver: (() => void) | null = null;
   private hasPromptedBatteryOptimization = false;
   private hasPromptedPhoneAccount = false;
+  private actionExecution: Promise<void> = Promise.resolve();
 
   async initialize(handlers: CallNativeHandlers) {
     this.handlers = handlers;
@@ -86,11 +92,16 @@ class CallNativeManager {
   }
 
   private async doInitialize() {
-    await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
+    if (Platform.OS === 'android') {
+      await this.setupAndroidCallKeep();
+    } else {
+      await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
+    }
     RNCallKeep.setReachable();
     await this.ensureChannels();
     this.registerForegroundService();
     this.bindListeners();
+    await this.consumeInitialNativeEvents();
     this.initialized = true;
   }
 
@@ -104,22 +115,77 @@ class CallNativeManager {
     }
   }
 
-  async showIncomingCall(session: CallSessionPayload) {
+  async showIncomingCall(session: CallSessionPayload): Promise<boolean> {
     await this.ensureInitialized();
 
-    RNCallKeep.displayIncomingCall(
-      session.id,
-      this.getHandle(session),
-      this.getCallerName(session),
-      'generic',
-      false,
-      {
-        supportsHolding: false,
-        supportsGrouping: false,
-        supportsUngrouping: false,
-        supportsDTMF: false,
+    if (Platform.OS === 'android') {
+      try {
+        const enabled = await RNCallKeep.checkPhoneAccountEnabled();
+        if (!enabled) {
+          await this.showIncomingFallbackNotification(session);
+          return false;
+        }
+      } catch {}
+    }
+
+    try {
+      RNCallKeep.displayIncomingCall(
+        session.id,
+        this.getHandle(session),
+        this.getCallerName(session),
+        'generic',
+        false,
+        {
+          supportsHolding: false,
+          supportsGrouping: false,
+          supportsUngrouping: false,
+          supportsDTMF: false,
+        },
+      );
+      return true;
+    } catch {
+      if (Platform.OS === 'android') {
+        await this.showIncomingFallbackNotification(session);
+        return false;
+      }
+      throw new Error('No fue posible mostrar la llamada entrante');
+    }
+  }
+
+  async showIncomingFallbackNotification(session: CallSessionPayload) {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    await this.ensureInitialized();
+    await notifee.displayNotification({
+      id: `${INCOMING_FALLBACK_NOTIFICATION_PREFIX}${session.id}`,
+      title: 'Llamada entrante de portería',
+      body: this.getCallerName(session),
+      android: {
+        channelId: CALL_CHANNEL_ID,
+        smallIcon: 'ic_stat_intercom',
+        category: AndroidCategory.CALL,
+        color: '#d4af37',
+        colorized: true,
+        ongoing: false,
+        autoCancel: true,
+        pressAction: { id: ACTION_OPEN_CALL, launchActivity: 'default' },
+        fullScreenAction: { id: ACTION_OPEN_CALL, launchActivity: 'default' },
+        actions: [
+          {
+            title: 'Rechazar',
+            pressAction: { id: ACTION_REJECT_CALL, launchActivity: 'default' },
+          },
+          {
+            title: 'Contestar',
+            pressAction: { id: ACTION_ANSWER_CALL, launchActivity: 'default' },
+          },
+        ],
+        importance: AndroidImportance.HIGH,
+        visibility: AndroidVisibility.PUBLIC,
       },
-    );
+    });
   }
 
   async startOutgoingCall(session: CallSessionPayload) {
@@ -384,13 +450,12 @@ class CallNativeManager {
 
     RNCallKeep.addEventListener('didLoadWithEvents', (events) => {
       events.forEach((event) => {
-        if (event.name === 'RNCallKeepPerformAnswerCallAction' && event.data?.callUUID) {
-          this.enqueueAction({ type: 'answer', callId: event.data.callUUID });
-        }
-        if (event.name === 'RNCallKeepPerformEndCallAction' && event.data?.callUUID) {
-          this.enqueueAction({ type: 'end', callId: event.data.callUUID });
-        }
+        this.handleDeferredCallKeepEvent(event);
       });
+    });
+
+    RNCallKeep.addEventListener('showIncomingCallUi', () => {
+      this.enqueueAction({ type: 'open' });
     });
 
     RNCallKeep.addEventListener('checkReachability', () => {
@@ -398,12 +463,14 @@ class CallNativeManager {
     });
 
     notifee.onForegroundEvent((event) => {
-      if (event.type === EventType.PRESS || event.type === EventType.ACTION_PRESS) {
-        this.enqueueAction({ type: 'open' });
-      }
+      void this.handleNotifeeInteraction(event);
     });
 
     this.listenersBound = true;
+  }
+
+  async handleBackgroundNotificationEvent(event: NotifeeEvent) {
+    await this.handleNotifeeInteraction(event);
   }
 
   private async dispatchAction(action: NativeAction) {
@@ -427,7 +494,11 @@ class CallNativeManager {
   }
 
   private enqueueAction(action: NativeAction) {
-    void this.dispatchAction(action);
+    this.actionExecution = this.actionExecution
+      .then(async () => {
+        await this.dispatchAction(action);
+      })
+      .catch(() => undefined);
   }
 
   private async flushPendingActions() {
@@ -466,7 +537,14 @@ class CallNativeManager {
     const androidVersion = Number(Platform.Version);
     const permissions = [
       PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+      PermissionsAndroid.PERMISSIONS.CALL_PHONE,
     ] as Parameters<typeof PermissionsAndroid.requestMultiple>[0];
+
+    if (androidVersion >= 30) {
+      permissions.push('android.permission.READ_PHONE_NUMBERS' as any);
+    } else {
+      permissions.push(PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE);
+    }
 
     if (androidVersion >= 33) {
       permissions.push('android.permission.POST_NOTIFICATIONS' as any);
@@ -520,11 +598,45 @@ class CallNativeManager {
     }
 
     this.hasPromptedPhoneAccount = true;
+    try {
+      RNCallKeep.registerPhoneAccount(CALLKEEP_OPTIONS as any);
+    } catch {}
     Alert.alert(
       'Activa llamadas del sistema',
       'Para que la llamada entrante aparezca como una llamada real, acepta el servicio de llamadas del intercom cuando Android lo pida.',
       [{ text: 'Entendido' }],
     );
+  }
+
+  private async setupAndroidCallKeep() {
+    try {
+      await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
+      return;
+    } catch (error) {
+      if (!this.isMissingCurrentActivityError(error)) {
+        throw error;
+      }
+    }
+
+    RNCallKeep.setSettings(CALLKEEP_OPTIONS as any);
+    RNCallKeep.registerPhoneAccount(CALLKEEP_OPTIONS as any);
+    RNCallKeep.registerAndroidEvents();
+  }
+
+  private isMissingCurrentActivityError(error: unknown) {
+    if (typeof error === 'string') {
+      return error.toLowerCase().includes("activity doesn't exist");
+    }
+
+    if (error instanceof Error) {
+      return error.message.toLowerCase().includes("activity doesn't exist");
+    }
+
+    if (error && typeof error === 'object' && 'code' in error) {
+      return String((error as { code?: unknown }).code) === 'E_ACTIVITY_DOES_NOT_EXIST';
+    }
+
+    return false;
   }
 
   private async displayForegroundNotification(options: {
@@ -551,7 +663,7 @@ class CallNativeManager {
         asForegroundService: true,
         ongoing: options.ongoing,
         onlyAlertOnce: true,
-        pressAction: { id: 'open-call' },
+        pressAction: { id: ACTION_OPEN_CALL },
         showChronometer: options.showChronometer,
         timestamp: options.timestamp,
         visibility: AndroidVisibility.PUBLIC,
@@ -589,6 +701,70 @@ class CallNativeManager {
     }
 
     return 'Portería';
+  }
+
+  private async handleNotifeeInteraction(event: NotifeeEvent) {
+    if (event.type !== EventType.PRESS && event.type !== EventType.ACTION_PRESS) {
+      return;
+    }
+
+    const actionId = event.detail.pressAction?.id ?? null;
+    const notificationId = event.detail.notification?.id ?? null;
+    const callId = this.extractCallIdFromNotification(notificationId);
+
+    if (callId && actionId === ACTION_ANSWER_CALL) {
+      this.enqueueAction({ type: 'answer', callId });
+    } else if (callId && actionId === ACTION_REJECT_CALL) {
+      this.enqueueAction({ type: 'end', callId });
+    } else {
+      this.enqueueAction({ type: 'open' });
+    }
+
+    if (notificationId) {
+      try {
+        await notifee.cancelNotification(notificationId);
+      } catch {}
+    }
+  }
+
+  private extractCallIdFromNotification(notificationId: string | null) {
+    if (!notificationId || !notificationId.startsWith(INCOMING_FALLBACK_NOTIFICATION_PREFIX)) {
+      return null;
+    }
+
+    const callId = notificationId.slice(INCOMING_FALLBACK_NOTIFICATION_PREFIX.length);
+    return callId || null;
+  }
+
+  private handleDeferredCallKeepEvent(event: any) {
+    if (!event?.name) {
+      return;
+    }
+
+    const callUUID = typeof event.data?.callUUID === 'string' ? event.data.callUUID : null;
+    if (event.name === 'RNCallKeepPerformAnswerCallAction' && callUUID) {
+      this.enqueueAction({ type: 'answer', callId: callUUID });
+      return;
+    }
+    if (event.name === 'RNCallKeepPerformEndCallAction' && callUUID) {
+      this.enqueueAction({ type: 'end', callId: callUUID });
+      return;
+    }
+    if (event.name === 'RNCallKeepShowIncomingCallUi') {
+      this.enqueueAction({ type: 'open' });
+    }
+  }
+
+  private async consumeInitialNativeEvents() {
+    try {
+      const events = await RNCallKeep.getInitialEvents();
+      if (Array.isArray(events)) {
+        events.forEach((event) => {
+          this.handleDeferredCallKeepEvent(event);
+        });
+      }
+      await RNCallKeep.clearInitialEvents();
+    } catch {}
   }
 }
 

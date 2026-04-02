@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Event as NotifeeEvent } from '@notifee/react-native';
 import messaging, { type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { AppState, PermissionsAndroid, Platform, type AppStateStatus } from 'react-native';
 import InCallManager from 'react-native-incall-manager';
@@ -73,6 +74,9 @@ class CallService {
   private registeredVoipToken: string | null = null;
   private waitingOfferCallId: string | null = null;
   private waitingOfferRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private recentSystemAnswerByCallId = new Map<string, number>();
+  private localMediaSetupPromise: Promise<boolean> | null = null;
+  private localMediaSetupCallId: string | null = null;
 
   bootstrap() {
     if (this.bootstrapped) {
@@ -104,6 +108,14 @@ class CallService {
       if (nextState === 'active') {
         void this.updateIdleNotification().catch(() => undefined);
         void this.consumeDeferredSystemActions();
+        const current = callStore.getState();
+        if (
+          current.session?.id &&
+          ['connecting', 'active'].includes(current.phase) &&
+          !this.localStream
+        ) {
+          void this.ensureLocalMediaReady(current.session.id).catch(() => undefined);
+        }
       }
     });
 
@@ -287,18 +299,8 @@ class CallService {
       return;
     }
 
-    const hasPermission = await this.ensureMicrophonePermission();
-    if (!hasPermission) {
-      this.traceCall(
-        current.session.id,
-        'mobile.permissions.microphone_denied',
-        'No se concedió permiso de micrófono para contestar',
-        'error',
-      );
-      await callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
-      await this.clearPendingIncomingCall(current.session.id);
-      callStore.reset();
-      return;
+    if (fromSystem) {
+      this.traceCall(current.session.id, 'mobile.system.answer_processing', 'Procesando respuesta desde UI nativa');
     }
 
     try {
@@ -307,15 +309,6 @@ class CallService {
       }
 
       await this.ensureRealtimeReady();
-      InCallManager.stopRingtone();
-      this.localStream = await mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
-      });
-      InCallManager.start({ media: 'audio', auto: true });
-      InCallManager.setKeepScreenOn(true);
-      InCallManager.setForceSpeakerphoneOn(true);
-
       callStore.patch({
         phase: 'connecting',
         muted: false,
@@ -327,6 +320,16 @@ class CallService {
         callId: current.session.id,
       });
       this.scheduleOfferRetryRequest(current.session.id);
+
+      const mediaReady = await this.ensureLocalMediaReady(current.session.id);
+      if (!mediaReady) {
+        this.traceCall(
+          current.session.id,
+          'mobile.media.pending',
+          'Llamada aceptada, pero el audio local aún no está listo',
+          'warn',
+        );
+      }
     } catch (error) {
       this.traceCall(
         current.session.id,
@@ -344,6 +347,8 @@ class CallService {
     if (!current.session) {
       return;
     }
+
+    this.recentSystemAnswerByCallId.delete(current.session.id);
 
     InCallManager.stopRingtone();
     callStore.patch({ phase: 'ending' });
@@ -365,6 +370,8 @@ class CallService {
     if (!current.session) {
       return;
     }
+
+    this.recentSystemAnswerByCallId.delete(current.session.id);
 
     callStore.patch({ phase: 'ending' });
     this.teardownRtc();
@@ -388,6 +395,11 @@ class CallService {
     }
 
     await this.applyPushEvent(parsed, 'fcm');
+  }
+
+  async handleNotifeeBackgroundEvent(event: NotifeeEvent) {
+    this.bootstrap();
+    await callNative.handleBackgroundNotificationEvent(event);
   }
 
   private async handleOutgoing(session: CallSessionPayload) {
@@ -432,13 +444,39 @@ class CallService {
       error: null,
       startedAt: null,
     });
+    this.traceCall(
+      session.id,
+      'mobile.incoming.received',
+      `Push/evento entrante recibido por ${source}`,
+      'info',
+      { source, presentSystemCall },
+    );
 
     if (Platform.OS === 'android' && this.appState === 'active') {
       InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
     }
 
     if (presentSystemCall) {
-      await callNative.showIncomingCall(session);
+      try {
+        const displayed = await callNative.showIncomingCall(session);
+        if (displayed) {
+          this.traceCall(session.id, 'mobile.incoming.system_presented', 'Llamada entrante presentada en sistema');
+        } else {
+          this.traceCall(
+            session.id,
+            'mobile.incoming.system_failed',
+            'No se pudo mostrar llamada nativa; se mostró notificación fallback',
+            'warn',
+          );
+        }
+      } catch (error) {
+        this.traceCall(
+          session.id,
+          'mobile.incoming.system_failed',
+          error instanceof Error ? error.message : 'Fallo al presentar llamada nativa',
+          'error',
+        );
+      }
     }
 
     await this.consumeDeferredSystemActions();
@@ -536,6 +574,15 @@ class CallService {
 
     if (signal.type === 'offer' && signal.sdp) {
       this.clearOfferRetryRequest(callId);
+      const mediaReady = await this.ensureLocalMediaReady(callId);
+      if (!mediaReady) {
+        this.traceCall(
+          callId,
+          'mobile.answer.no_local_media',
+          'Se responderá oferta sin audio local listo todavía',
+          'warn',
+        );
+      }
       this.traceCall(callId, 'mobile.answer.sending', 'Oferta recibida, enviando respuesta');
       const peer = await this.ensurePeer(callId);
       await peer.setRemoteDescription(
@@ -671,6 +718,7 @@ class CallService {
     this.stopAudioModes();
     this.teardownRtc();
     await this.clearPendingIncomingCall(session.id);
+    this.recentSystemAnswerByCallId.delete(session.id);
 
     const reason =
       session.endedReason === 'answered_elsewhere'
@@ -754,6 +802,17 @@ class CallService {
 
   private async ensureMicrophonePermission(isWarmup = false) {
     if (Platform.OS === 'android') {
+      const alreadyGranted = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+      );
+      if (alreadyGranted) {
+        return true;
+      }
+
+      if (AppState.currentState !== 'active') {
+        return false;
+      }
+
       const result = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
         {
@@ -801,6 +860,8 @@ class CallService {
     this.peerCallId = null;
     this.pendingRemoteCandidates = [];
     this.clearOfferRetryRequest();
+    this.localMediaSetupCallId = null;
+    this.localMediaSetupPromise = null;
 
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = null;
@@ -810,6 +871,90 @@ class CallService {
     this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
+  }
+
+  private async ensureLocalMediaReady(callId: string) {
+    if (this.localStream) {
+      return true;
+    }
+
+    if (this.localMediaSetupPromise && this.localMediaSetupCallId === callId) {
+      return this.localMediaSetupPromise;
+    }
+
+    this.localMediaSetupCallId = callId;
+    this.localMediaSetupPromise = (async () => {
+      const hasPermission = await this.withTimeout(
+        this.ensureMicrophonePermission(),
+        4_500,
+        false,
+      );
+      if (!hasPermission) {
+        this.traceCall(
+          callId,
+          'mobile.permissions.microphone_unavailable',
+          'Micrófono no disponible en este momento (requiere app activa o permiso)',
+          'warn',
+        );
+        return false;
+      }
+
+      try {
+        InCallManager.stopRingtone();
+        const stream = await this.withTimeout(
+          mediaDevices
+            .getUserMedia({ audio: true, video: false })
+            .then((value) => value as MediaStream | null),
+          8_000,
+          null,
+        );
+        if (!stream) {
+          throw new Error('Timeout solicitando micrófono');
+        }
+        this.localStream = stream;
+        InCallManager.start({ media: 'audio', auto: true });
+        InCallManager.setKeepScreenOn(true);
+        InCallManager.setForceSpeakerphoneOn(true);
+        this.attachLocalStreamToCurrentPeer(callId);
+        this.traceCall(callId, 'mobile.media.ready', 'Micrófono local listo para la llamada');
+        return true;
+      } catch (error) {
+        this.traceCall(
+          callId,
+          'mobile.media.failed',
+          error instanceof Error ? error.message : 'Error preparando micrófono local',
+          'error',
+        );
+        return false;
+      }
+    })().finally(() => {
+      if (this.localMediaSetupCallId === callId) {
+        this.localMediaSetupCallId = null;
+        this.localMediaSetupPromise = null;
+      }
+    });
+
+    return this.localMediaSetupPromise;
+  }
+
+  private attachLocalStreamToCurrentPeer(callId: string) {
+    if (!this.peer || this.peerCallId !== callId || !this.localStream) {
+      return;
+    }
+
+    const existingTrackIds = new Set(
+      this.peer
+        .getSenders()
+        .map((sender) => sender.track?.id ?? null)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    this.localStream.getTracks().forEach((track) => {
+      if (!this.localStream || existingTrackIds.has(track.id)) {
+        return;
+      }
+      this.peer?.addTrack(track, this.localStream);
+    });
   }
 
   private scheduleOfferRetryRequest(callId: string) {
@@ -941,6 +1086,22 @@ class CallService {
     }
   }
 
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race<T>([
+        promise,
+        new Promise<T>((resolve) => {
+          timeout = setTimeout(() => resolve(fallback), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
   private setPorters(porters: PorterAvailability[]) {
     this.porters = porters;
     this.porterListeners.forEach((listener) => listener(porters));
@@ -1013,10 +1174,18 @@ class CallService {
   }
 
   private async handleSystemAnswer(callId: string) {
+    this.traceCall(callId, 'mobile.system.answer_event', 'Evento nativo answer recibido');
+    this.recentSystemAnswerByCallId.set(callId, Date.now());
     await this.restorePendingIncomingCall();
     const current = callStore.getState();
     if (current.session?.id !== callId) {
       this.deferredAnswerCallId = callId;
+      this.traceCall(
+        callId,
+        'mobile.system.answer_deferred',
+        'Respuesta nativa recibida antes de restaurar sesión local',
+        'warn',
+      );
       await this.ensureRealtimeReady().catch(() => undefined);
       return;
     }
@@ -1026,10 +1195,22 @@ class CallService {
   }
 
   private async handleSystemEnd(callId: string) {
+    this.traceCall(callId, 'mobile.system.end_event', 'Evento nativo end recibido');
     await this.restorePendingIncomingCall();
     const current = callStore.getState();
     if (current.session?.id !== callId) {
       this.deferredEndCallId = callId;
+      return;
+    }
+
+    const answerAt = this.recentSystemAnswerByCallId.get(callId) ?? 0;
+    if (current.phase === 'incoming' && answerAt > 0 && Date.now() - answerAt <= 3_500) {
+      this.traceCall(
+        callId,
+        'mobile.system.end_ignored_after_answer',
+        'Se ignoró end inmediato tras answer para evitar rechazo espurio',
+        'warn',
+      );
       return;
     }
 
