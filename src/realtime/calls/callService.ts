@@ -16,6 +16,7 @@ import {
   getCallPorters,
   getCallsIceConfig,
   REALTIME_URL,
+  createCallTrace,
   registerCallDevice,
   unregisterCallDevice,
   type PorterAvailability,
@@ -70,6 +71,8 @@ class CallService {
   private deferredEndCallId: string | null = null;
   private registeredFcmToken: string | null = null;
   private registeredVoipToken: string | null = null;
+  private waitingOfferCallId: string | null = null;
+  private waitingOfferRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   bootstrap() {
     if (this.bootstrapped) {
@@ -163,6 +166,10 @@ class CallService {
       void this.handleSignal(event.callId, event.signal);
     });
 
+    this.socket.on('calls:request-offer', (event: { callId?: string }) => {
+      void this.handleOfferRetryRequest(event.callId ?? null);
+    });
+
     this.socket.on('calls:ended', (session: CallSessionPayload) => {
       void this.handleTerminal(session);
     });
@@ -180,6 +187,10 @@ class CallService {
     });
 
     this.socket.on('calls:error', () => {
+      const current = callStore.getState();
+      if (current.session?.id) {
+        this.traceCall(current.session.id, 'mobile.socket.error', 'Socket de llamadas reportó un error', 'error');
+      }
       callStore.reset();
     });
 
@@ -278,6 +289,12 @@ class CallService {
 
     const hasPermission = await this.ensureMicrophonePermission();
     if (!hasPermission) {
+      this.traceCall(
+        current.session.id,
+        'mobile.permissions.microphone_denied',
+        'No se concedió permiso de micrófono para contestar',
+        'error',
+      );
       await callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
       await this.clearPendingIncomingCall(current.session.id);
       callStore.reset();
@@ -305,10 +322,18 @@ class CallService {
         speaker: true,
         error: null,
       });
+      this.traceCall(current.session.id, 'mobile.accept.sent', 'Llamada aceptada en móvil, esperando oferta WebRTC');
       this.socket?.emit('calls:accept', {
         callId: current.session.id,
       });
+      this.scheduleOfferRetryRequest(current.session.id);
     } catch (error) {
+      this.traceCall(
+        current.session.id,
+        'mobile.accept.failed',
+        error instanceof Error ? error.message : 'Error al contestar llamada',
+        'error',
+      );
       await callNative.endCall(current.session.id, CALL_END_REASONS.FAILED);
       callStore.reset();
     }
@@ -440,6 +465,7 @@ class CallService {
         startedAt,
       });
       await callNative.markCallConnecting(session, startedAt);
+      this.traceCall(session.id, 'mobile.accept.confirmed', 'Evento accepted recibido para llamada outbound');
       return;
     }
 
@@ -459,10 +485,27 @@ class CallService {
 
   private async startOfferForCall(session: CallSessionPayload) {
     if (!this.localStream) {
+      this.traceCall(session.id, 'mobile.offer.missing_stream', 'No hay stream local para crear oferta', 'error');
       return;
     }
 
     const peer = await this.ensurePeer(session.id);
+    if (
+      peer.localDescription?.type === 'offer' &&
+      (peer as any).signalingState === 'have-local-offer'
+    ) {
+      await this.ensureRealtimeReady();
+      this.socket?.emit('calls:signal', {
+        callId: session.id,
+        signal: {
+          type: 'offer',
+          sdp: peer.localDescription.sdp ?? undefined,
+        },
+      });
+      this.traceCall(session.id, 'mobile.offer.resent', 'Reenvío de oferta local pendiente');
+      return;
+    }
+
     const offer = await peer.createOffer({
       offerToReceiveAudio: true,
     });
@@ -476,6 +519,7 @@ class CallService {
         sdp: offer.sdp,
       },
     });
+    this.traceCall(session.id, 'mobile.offer.sent', 'Oferta enviada');
   }
 
   private async handleSignal(callId: string, signal: CallSignalEnvelope) {
@@ -491,6 +535,8 @@ class CallService {
     }
 
     if (signal.type === 'offer' && signal.sdp) {
+      this.clearOfferRetryRequest(callId);
+      this.traceCall(callId, 'mobile.answer.sending', 'Oferta recibida, enviando respuesta');
       const peer = await this.ensurePeer(callId);
       await peer.setRemoteDescription(
         new RTCSessionDescription({
@@ -510,6 +556,7 @@ class CallService {
           sdp: answer.sdp,
         },
       });
+      this.traceCall(callId, 'mobile.answer.sent', 'Respuesta enviada al originador');
       return;
     }
 
@@ -528,6 +575,8 @@ class CallService {
       const startedAt = current.startedAt ?? Date.now();
       callStore.patch({ phase: 'active', error: null, startedAt });
       await callNative.markCallActive(current.session, startedAt);
+      this.clearOfferRetryRequest(callId);
+      this.traceCall(callId, 'mobile.call.active', 'Respuesta remota recibida, llamada activa');
       return;
     }
 
@@ -631,6 +680,14 @@ class CallService {
           : session.status === 'rejected'
             ? 'La llamada fue rechazada'
             : 'Llamada finalizada';
+
+    this.traceCall(
+      session.id,
+      'mobile.call.terminal',
+      reason,
+      session.status === 'rejected' || session.status === 'missed' ? 'warn' : 'info',
+      { endedReason: session.endedReason ?? null, status: session.status },
+    );
 
     await callNative.endCall(session.id, this.mapEndReason(session));
     await this.updateIdleNotification();
@@ -743,6 +800,7 @@ class CallService {
     this.peer = null;
     this.peerCallId = null;
     this.pendingRemoteCandidates = [];
+    this.clearOfferRetryRequest();
 
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = null;
@@ -752,6 +810,93 @@ class CallService {
     this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
+  }
+
+  private scheduleOfferRetryRequest(callId: string) {
+    this.clearOfferRetryRequest();
+    this.waitingOfferCallId = callId;
+    this.waitingOfferRetryTimer = setTimeout(() => {
+      void this.requestOfferRetry(callId);
+    }, 4_500);
+  }
+
+  private clearOfferRetryRequest(callId?: string) {
+    if (callId && this.waitingOfferCallId && this.waitingOfferCallId !== callId) {
+      return;
+    }
+
+    if (this.waitingOfferRetryTimer) {
+      clearTimeout(this.waitingOfferRetryTimer);
+      this.waitingOfferRetryTimer = null;
+    }
+    this.waitingOfferCallId = null;
+  }
+
+  private async requestOfferRetry(callId: string) {
+    const current = callStore.getState();
+    if (!current.session || current.session.id !== callId || current.phase !== 'connecting') {
+      return;
+    }
+    if (this.peer && this.peerCallId === callId && this.peer.remoteDescription) {
+      return;
+    }
+
+    try {
+      await this.ensureRealtimeReady();
+      this.traceCall(callId, 'mobile.offer.retry_requested', 'Sin oferta inicial, solicitando reenvío de señal', 'warn');
+      this.socket?.emit('calls:request-offer', { callId });
+    } catch (error) {
+      this.traceCall(
+        callId,
+        'mobile.offer.retry_failed',
+        'No fue posible solicitar reenvío de oferta',
+        'error',
+        error instanceof Error ? { error: error.message } : null,
+      );
+    }
+  }
+
+  private async handleOfferRetryRequest(callId: string | null) {
+    if (!callId) {
+      return;
+    }
+
+    const current = callStore.getState();
+    if (!current.session || current.session.id !== callId) {
+      return;
+    }
+
+    const user = authStore.getUser();
+    const shouldStartOffer =
+      current.session.direction === 'inbound' ||
+      (current.session.direction === 'internal' && user?.id === current.session.initiatedByEmployeeId);
+    if (!shouldStartOffer) {
+      return;
+    }
+
+    this.traceCall(callId, 'mobile.offer.retry_received', 'El remoto solicitó reintento de oferta');
+    await this.startOfferForCall(current.session);
+  }
+
+  private traceCall(
+    callId: string,
+    stage: string,
+    message: string,
+    level: 'info' | 'warn' | 'error' = 'info',
+    metadata: Record<string, unknown> | null = null,
+  ) {
+    void createCallTrace({
+      callId,
+      source: 'mobile',
+      stage,
+      message,
+      level,
+      metadata,
+    }).catch(() => undefined);
+
+    if (__DEV__) {
+      console.info(`[CallTrace:${callId}] ${stage} - ${message}`, metadata ?? undefined);
+    }
   }
 
   private async addRemoteIceCandidate(

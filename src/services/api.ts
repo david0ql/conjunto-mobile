@@ -193,6 +193,15 @@ export interface CallDeviceRegistrationResult {
   ok: boolean;
 }
 
+export interface CreateCallTraceInput {
+  callId: string;
+  source: 'web' | 'mobile' | 'api';
+  stage: string;
+  message: string;
+  level?: 'info' | 'warn' | 'error';
+  metadata?: Record<string, unknown> | null;
+}
+
 
 // ─── HTTP client ──────────────────────────────────────────────────────────────
 
@@ -349,6 +358,10 @@ export async function registerCallDevice(payload: RegisterCallDeviceInput): Prom
 
 export async function unregisterCallDevice(payload: Partial<RegisterCallDeviceInput> & { deviceId?: string | null } = {}): Promise<CallDeviceRegistrationResult> {
   return request<CallDeviceRegistrationResult>('POST', '/calls/devices/unregister', payload);
+}
+
+export async function createCallTrace(payload: CreateCallTraceInput): Promise<CallDeviceRegistrationResult> {
+  return request<CallDeviceRegistrationResult>('POST', '/calls/trace', payload);
 }
 
 // ─── Assemblies ───────────────────────────────────────────────────────────────
