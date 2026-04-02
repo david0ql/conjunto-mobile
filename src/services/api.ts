@@ -115,8 +115,15 @@ export interface AccessEntry {
   id: string;
   entryTime: string;
   exitTime?: string | null;
+  entryType: 'pedestrian' | 'car' | 'motorcycle' | 'other';
+  vehicleBrandId?: string | null;
+  vehicleColor?: string | null;
+  vehiclePlate?: string | null;
+  vehicleModel?: string | null;
+  visitorPhotoPath?: string | null;
   notes?: string | null;
   visitor?: { id: string; name: string; lastName: string } | null;
+  vehicleBrand?: { id: string; name: string } | null;
   vehicle?: { id: string; plate: string } | null;
   authorizedByEmployee?: { id: string; name: string; lastName: string } | null;
 }

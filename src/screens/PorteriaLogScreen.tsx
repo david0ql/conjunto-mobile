@@ -46,6 +46,28 @@ function formatRelativeTime(dateStr: string): string {
   return `${days}d`;
 }
 
+function entryTypeLabel(type: AccessEntry['entryType'] | undefined): string {
+  if (type === 'car') return 'Ingreso en carro';
+  if (type === 'motorcycle') return 'Ingreso en moto';
+  if (type === 'other') return 'Ingreso en otro medio';
+  return 'Ingreso a pie';
+}
+
+function vehicleSummary(entry: AccessEntry): string | null {
+  const requiresVehicleData = entry.entryType === 'car' || entry.entryType === 'motorcycle';
+  if (!requiresVehicleData) return null;
+
+  const parts = [
+    entry.vehicleBrand?.name,
+    entry.vehicleModel,
+    entry.vehicleColor,
+    entry.vehiclePlate ?? entry.vehicle?.plate,
+  ].filter(Boolean);
+
+  if (parts.length === 0) return null;
+  return parts.join(' · ');
+}
+
 // ─── Package photos modal ─────────────────────────────────────────────────────
 
 function PackagePhotosModal({
@@ -424,25 +446,30 @@ export function PorteriaLogScreen() {
               entries.map((entry) => {
                 const visitorName = entry.visitor
                   ? `${entry.visitor.name} ${entry.visitor.lastName}`
-                  : entry.vehicle
-                    ? 'Vehículo'
+                  : entry.entryType === 'car' || entry.entryType === 'motorcycle'
+                    ? 'Visitante en vehículo'
                     : 'Residente';
+                const visitorPhotoUri = resolveImageUrl(entry.visitorPhotoPath);
+                const vehicleDetails = vehicleSummary(entry);
 
                 return (
                   <View key={entry.id} style={styles.visitorRow}>
                     <View style={styles.visitorIdentity}>
                       <View style={styles.visitorAvatarPlaceholder}>
-                        <MaterialIcons
-                          color={noirTheme.primary}
-                          name={entry.vehicle ? 'directions-car' : 'person'}
-                          size={28}
-                        />
+                        {visitorPhotoUri ? (
+                          <Image source={{ uri: visitorPhotoUri }} style={styles.visitorAvatarImage} resizeMode="cover" />
+                        ) : (
+                          <MaterialIcons
+                            color={noirTheme.primary}
+                            name={entry.entryType === 'car' || entry.entryType === 'motorcycle' ? 'directions-car' : 'person'}
+                            size={28}
+                          />
+                        )}
                       </View>
                       <View>
                         <Text style={styles.visitorName}>{visitorName}</Text>
-                        <Text style={styles.visitorRole}>
-                          {entry.vehicle ? 'Vehículo' : 'Visita personal'}
-                        </Text>
+                        <Text style={styles.visitorRole}>{entryTypeLabel(entry.entryType)}</Text>
+                        {vehicleDetails ? <Text style={styles.visitorVehicleMeta}>{vehicleDetails}</Text> : null}
                       </View>
                     </View>
                     <View style={styles.visitorTimeWrap}>
@@ -883,6 +910,11 @@ const styles = StyleSheet.create({
     backgroundColor: noirTheme.surfaceHigh,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  visitorAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   visitorName: {
     color: noirTheme.primary,
@@ -895,6 +927,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
+  },
+  visitorVehicleMeta: {
+    marginTop: 4,
+    color: noirTheme.secondary,
+    fontSize: 10,
+    lineHeight: 14,
   },
   visitorTimeWrap: {
     alignItems: 'flex-end',
