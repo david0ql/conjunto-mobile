@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Modal,
   Pressable,
@@ -268,6 +269,16 @@ export function PorteriaLogScreen() {
     fetchPorters();
     getMyApartments().then(setApartments).catch(() => {});
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        fetchPackages(1);
+      }
+    });
+
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {

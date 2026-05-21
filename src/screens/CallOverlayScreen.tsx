@@ -43,8 +43,9 @@ export function CallOverlayScreen() {
     callService.toggleSpeaker();
   }, []);
 
-  const isActive = phase === 'connecting' || phase === 'active';
-  const isIncoming = phase === 'incoming' || phase === 'ringing';
+  const isActive = phase === 'active';
+  const isIncoming = phase === 'incoming';
+  const isOutgoing = phase === 'ringing';
 
   useEffect(() => {
     if (phase === 'idle' || phase === 'ended' || phase === 'error') {
@@ -72,10 +73,12 @@ export function CallOverlayScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        {isIncoming && (
+        {(isIncoming || isOutgoing) && (
           <View style={styles.callTypeBadge}>
             <MaterialIcons name="phone-in-talk" size={14} color="#000" />
-            <Text style={styles.callTypeText}>LLAMADA ENTRANTE</Text>
+            <Text style={styles.callTypeText}>
+              {isIncoming ? 'LLAMADA ENTRANTE' : 'LLAMANDO'}
+            </Text>
           </View>
         )}
 
@@ -84,6 +87,8 @@ export function CallOverlayScreen() {
 
         {isIncoming ? (
           <Text style={styles.statusText}>Llamada entrante...</Text>
+        ) : isOutgoing ? (
+          <Text style={styles.statusText}>Esperando respuesta...</Text>
         ) : isActive ? (
           <Text style={styles.statusText}>Llamada activa</Text>
         ) : phase === 'connecting' ? (

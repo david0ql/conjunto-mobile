@@ -3,7 +3,10 @@
  */
 
 import notifee from '@notifee/react-native';
-import messaging from '@react-native-firebase/messaging';
+import {
+  getMessaging,
+  setBackgroundMessageHandler,
+} from '@react-native-firebase/messaging';
 import { Navigation } from 'react-native-navigation';
 import { registerScreens } from './src/navigation/registerScreens';
 import { callService } from './src/realtime/calls/callService';
@@ -19,7 +22,7 @@ notifee.onBackgroundEvent(async (event) => {
   await callService.handleNotifeeBackgroundEvent(event);
 });
 
-messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+setBackgroundMessageHandler(getMessaging(), async (remoteMessage) => {
   await callService.handleFirebaseRemoteMessage(remoteMessage);
 });
 

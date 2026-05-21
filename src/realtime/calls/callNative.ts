@@ -463,7 +463,7 @@ class CallNativeManager {
       name: 'Llamada entrante de portería',
       importance: AndroidImportance.HIGH,
       vibration: true,
-      vibrationPattern: [0, 400, 250, 400, 250, 400],
+      vibrationPattern: [400, 250, 400, 250],
       lights: true,
       sound: 'default',
       badge: false,

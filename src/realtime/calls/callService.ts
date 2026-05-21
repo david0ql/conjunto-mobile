@@ -1,7 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Event as NotifeeEvent } from '@notifee/react-native';
-import messaging, { type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
-import { AppState, PermissionsAndroid, Platform, type AppStateStatus } from 'react-native';
+import {
+  AuthorizationStatus,
+  getMessaging,
+  getToken,
+  hasPermission,
+  onMessage,
+  onTokenRefresh,
+  requestPermission,
+  type FirebaseMessagingTypes,
+} from '@react-native-firebase/messaging';
+import { Alert, AppState, Linking, PermissionsAndroid, Platform, type AppStateStatus } from 'react-native';
 import InCallManager from 'react-native-incall-manager';
 import { Navigation } from 'react-native-navigation';
 import VoipPushNotification from 'react-native-voip-push-notification';
@@ -48,6 +57,7 @@ type ParsedCallPush = {
 const PENDING_CALL_KEY = 'intercom_pending_call';
 const DEVICE_ID_KEY = 'intercom_device_id';
 const PENDING_CALL_TTL_MS = 90_000;
+const firebaseMessaging = getMessaging();
 
 class CallService {
   private socket: Socket | null = null;
@@ -80,6 +90,8 @@ class CallService {
   private localMediaSetupPromise: Promise<boolean> | null = null;
   private localMediaSetupCallId: string | null = null;
   private answerProcessingCallId: string | null = null;
+  private pushRegistrationPromise: Promise<void> | null = null;
+  private hasPromptedMessagingSettings = false;
 
   bootstrap() {
     if (this.bootstrapped) {
@@ -448,6 +460,10 @@ class CallService {
       this.socket?.emit('calls:accept', {
         callId: current.session.id,
       });
+      await callNative.markCallConnecting(
+        current.session,
+        this.getSessionStartedAt(current.session),
+      );
       this.scheduleOfferRetryRequest(current.session.id);
 
       const mediaReady = await this.ensureLocalMediaReady(current.session.id);
@@ -560,6 +576,21 @@ class CallService {
     await callNative.handleBackgroundNotificationEvent(event);
   }
 
+  private showCallOverlay() {
+    try {
+      Navigation.showOverlay({
+        component: {
+          name: COMPONENTS.callOverlay,
+          id: 'CallOverlay',
+          options: {
+            layout: { backgroundColor: 'transparent' },
+            overlay: { interceptTouchOutside: false },
+          },
+        },
+      }).catch(() => {});
+    } catch {}
+  }
+
   private async handleOutgoing(session: CallSessionPayload) {
     await callNative.startOutgoingCall(session);
     callStore.patch({
@@ -570,6 +601,7 @@ class CallService {
       error: null,
       startedAt: null,
     });
+    this.showCallOverlay();
   }
 
   private async handleIncoming(
@@ -602,18 +634,7 @@ class CallService {
       { source, presentSystemCall },
     );
 
-    try {
-      Navigation.showOverlay({
-        component: {
-          name: COMPONENTS.callOverlay,
-          id: 'CallOverlay',
-          options: {
-            layout: { backgroundColor: 'transparent' },
-            overlay: { interceptTouchOutside: false },
-          },
-        },
-      }).catch(() => {});
-    } catch {} 
+    this.showCallOverlay();
 
     if (Platform.OS === 'android' && this.appState === 'active') {
       InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
@@ -655,7 +676,11 @@ class CallService {
     const startedAt = this.getSessionStartedAt(session);
 
     if (session.direction === 'outbound') {
-      if (currentUser?.id && session.acceptedByResidentId && session.acceptedByResidentId !== currentUser.id) {
+      if (
+        currentUser?.type === 'resident' &&
+        session.acceptedByResidentId &&
+        session.acceptedByResidentId !== currentUser.id
+      ) {
         await this.handleTerminal({
           ...session,
           status: 'ended',
@@ -675,6 +700,9 @@ class CallService {
       InCallManager.setKeepScreenOn(true);
       InCallManager.setForceSpeakerphoneOn(true);
       this.traceCall(session.id, 'mobile.accept.confirmed', 'Evento accepted recibido para llamada outbound');
+      if (currentUser?.type === 'employee' && session.initiatedByEmployeeId === currentUser.id) {
+        await this.startOfferForCall(session);
+      }
       return;
     }
 
@@ -780,6 +808,9 @@ class CallService {
           sdp: answer.sdp,
         },
       });
+      const startedAt = current.startedAt ?? Date.now();
+      callStore.patch({ phase: 'active', error: null, startedAt });
+      await callNative.markCallActive(current.session, startedAt);
       this.traceCall(callId, 'mobile.answer.sent', 'Respuesta enviada al originador');
       return;
     }
@@ -916,6 +947,18 @@ class CallService {
       return;
     }
 
+    // Re-check: session may have been replaced by a newer call during the
+    // await above (handleIncoming can run concurrently via the event loop).
+    const afterPersist = callStore.getState();
+    if (afterPersist.session?.id !== currentSessionId) {
+      this.traceCall(
+        session.id,
+        'mobile.terminal.skipped_cleanup',
+        `Se saltó cleanup porque llegó una nueva llamada (${afterPersist.session?.id})`,
+      );
+      return;
+    }
+
     InCallManager.stopRingtone();
     this.stopAudioModes();
     this.teardownRtc();
@@ -944,6 +987,12 @@ class CallService {
     await this.updateIdleNotification();
 
     if (!currentSessionId) {
+      return;
+    }
+
+    // Final guard: a new call may have arrived during endCall/notifications
+    const beforeReset = callStore.getState();
+    if (beforeReset.session?.id !== currentSessionId) {
       return;
     }
 
@@ -1313,13 +1362,13 @@ class CallService {
 
   private bindPushListeners() {
     if (!this.messageUnsubscribe) {
-      this.messageUnsubscribe = messaging().onMessage((remoteMessage) => {
+      this.messageUnsubscribe = onMessage(firebaseMessaging, (remoteMessage) => {
         void this.handleFirebaseRemoteMessage(remoteMessage);
       });
     }
 
     if (!this.tokenRefreshUnsubscribe) {
-      this.tokenRefreshUnsubscribe = messaging().onTokenRefresh((token) => {
+      this.tokenRefreshUnsubscribe = onTokenRefresh(firebaseMessaging, (token) => {
         this.registeredFcmToken = token;
         void this.registerCallPushToken({
           token,
@@ -1408,11 +1457,11 @@ class CallService {
     }
 
     const answerAt = this.recentSystemAnswerByCallId.get(callId) ?? 0;
-    if (current.phase === 'incoming' && answerAt > 0 && Date.now() - answerAt <= 3_500) {
+    if (answerAt > 0 && Date.now() - answerAt <= 12_000) {
       this.traceCall(
         callId,
         'mobile.system.end_ignored_after_answer',
-        'Se ignoró end inmediato tras answer para evitar rechazo espurio',
+        'Se ignoró end nativo posterior a answer para evitar cierre espurio',
         'warn',
       );
       return;
@@ -1566,16 +1615,26 @@ class CallService {
       return;
     }
 
+    if (this.pushRegistrationPromise) {
+      return this.pushRegistrationPromise;
+    }
+
+    this.pushRegistrationPromise = this.doRegisterPushTokens().finally(() => {
+      this.pushRegistrationPromise = null;
+    });
+
+    return this.pushRegistrationPromise;
+  }
+
+  private async doRegisterPushTokens() {
     const deviceId = await this.getDeviceId();
+    const hasMessagingPermission = await this.ensureMessagingPermission();
+    if (!hasMessagingPermission) {
+      return;
+    }
 
     try {
-      if (Platform.OS === 'ios') {
-        await messaging().registerDeviceForRemoteMessages();
-      }
-    } catch {}
-
-    try {
-      const token = await messaging().getToken();
+      const token = await getToken(firebaseMessaging);
       if (token) {
         this.registeredFcmToken = token;
         await this.registerCallPushToken({
@@ -1603,6 +1662,80 @@ class CallService {
           VoipPushNotification.registerVoipToken();
         } catch {}
       }
+    }
+  }
+
+  private async ensureMessagingPermission() {
+    if (Platform.OS === 'android') {
+      if (Number(Platform.Version) < 33) {
+        return true;
+      }
+
+      const permission = 'android.permission.POST_NOTIFICATIONS' as any;
+      const alreadyGranted = await PermissionsAndroid.check(permission);
+      if (alreadyGranted) {
+        return true;
+      }
+
+      if (AppState.currentState !== 'active') {
+        return false;
+      }
+
+      const result = await PermissionsAndroid.request(permission, {
+        title: 'Notificaciones de portería',
+        message: 'Permite notificaciones para recibir llamadas y avisos de portería.',
+        buttonPositive: 'Permitir',
+        buttonNegative: 'Cancelar',
+      });
+      return result === PermissionsAndroid.RESULTS.GRANTED;
+    }
+
+    try {
+      const currentStatus = await hasPermission(firebaseMessaging);
+      if (
+        currentStatus === AuthorizationStatus.AUTHORIZED ||
+        currentStatus === AuthorizationStatus.PROVISIONAL ||
+        currentStatus === AuthorizationStatus.EPHEMERAL
+      ) {
+        return true;
+      }
+
+      if (AppState.currentState !== 'active') {
+        return false;
+      }
+
+      const nextStatus = await requestPermission(firebaseMessaging, {
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      });
+      const granted =
+        nextStatus === AuthorizationStatus.AUTHORIZED ||
+        nextStatus === AuthorizationStatus.PROVISIONAL ||
+        nextStatus === AuthorizationStatus.EPHEMERAL;
+
+      if (!granted && !this.hasPromptedMessagingSettings) {
+        this.hasPromptedMessagingSettings = true;
+        Alert.alert(
+          'Permite notificaciones',
+          'Sin notificaciones no podemos avisarte a tiempo cuando portería te llame.',
+          [
+            { text: 'Ahora no', style: 'cancel' },
+            {
+              text: 'Abrir ajustes',
+              onPress: () => {
+                void Linking.openSettings();
+              },
+            },
+          ],
+        );
+      }
+
+      return granted;
+    } catch (error) {
+      console.warn('No fue posible validar permisos de Firebase Messaging', error);
+      return false;
     }
   }
 
