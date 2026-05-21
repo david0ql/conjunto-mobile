@@ -96,13 +96,17 @@ class CallNativeManager {
   }
 
   private async doInitialize() {
-    if (Platform.OS === 'android') {
-      await this.setupAndroidCallKeep();
-    } else {
-      await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
+    try {
+      if (Platform.OS === 'android') {
+        await this.setupAndroidCallKeep();
+      } else {
+        await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
+      }
+      RNCallKeep.setReachable();
+      await this.ensureChannels();
+    } catch (error) {
+      console.warn('callNative initialization parcialmente fallida', error);
     }
-    RNCallKeep.setReachable();
-    await this.ensureChannels();
     this.registerForegroundService();
     this.bindListeners();
     await this.consumeInitialNativeEvents();
@@ -418,14 +422,13 @@ class CallNativeManager {
       try {
         await this.initializePromise;
       } catch {
-        // Initialization failed (e.g., no Activity in headless context).
-        // Reset so the next caller retries rather than re-throwing a stale rejection.
-        this.initializePromise = null;
-        this.initialized = false;
+        this.initializePromise = this.doInitialize();
+        await this.initializePromise;
       }
       return;
     }
-    throw new Error('callNative.initialize must run before using native call controls');
+    this.initializePromise = this.doInitialize();
+    await this.initializePromise;
   }
 
   private async ensureChannels() {

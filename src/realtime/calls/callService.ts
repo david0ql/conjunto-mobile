@@ -86,7 +86,8 @@ class CallService {
     }
 
     this.bootstrapped = true;
-    void callNative
+
+    const nativeInitPromise = callNative
       .initialize({
         onAnswerCall: async (callId) => {
           await this.handleSystemAnswer(callId);
@@ -121,17 +122,14 @@ class CallService {
       }
     });
 
-    this.authBootstrapPromise = authStore
-      .init()
-      .then(() => {
-        const token = authStore.getToken();
-        if (token) {
-          this.start(token);
-        }
-      })
-      .catch((error) => {
-        console.warn('No fue posible restaurar la sesión para llamadas', error);
-      });
+    this.authBootstrapPromise = (async () => {
+      await nativeInitPromise;
+      await authStore.init();
+      const token = authStore.getToken();
+      if (token) {
+        this.start(token);
+      }
+    })();
   }
 
   start(token: string) {
@@ -153,7 +151,7 @@ class CallService {
     });
 
     this.socket.on('connect', () => {
-      void this.updateIdleNotification();
+      void this.updateIdleNotification().catch(() => undefined);
       void this.registerPushTokens().catch((error) => {
         console.warn('No fue posible registrar los tokens de llamadas', error);
       });
@@ -161,7 +159,7 @@ class CallService {
     });
 
     this.socket.on('disconnect', () => {
-      void this.updateIdleNotification();
+      void this.updateIdleNotification().catch(() => undefined);
     });
 
     this.socket.on('calls:outgoing', (session: CallSessionPayload) => {
@@ -480,6 +478,32 @@ class CallService {
       .catch(() => undefined);
   }
 
+  toggleMute() {
+    const current = callStore.getState();
+    const next = !current.muted;
+    callStore.patch({ muted: next });
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach((track) => {
+        track.enabled = !next;
+      });
+    }
+    const callId = current.session?.id;
+    if (callId) {
+      void callNative.syncMuted(callId, next).catch(() => undefined);
+    }
+  }
+
+  toggleSpeaker() {
+    const current = callStore.getState();
+    const next = !current.speaker;
+    callStore.patch({ speaker: next });
+    InCallManager.setForceSpeakerphoneOn(next);
+    const callId = current.session?.id;
+    if (callId) {
+      void callNative.syncSpeaker(callId, next).catch(() => undefined);
+    }
+  }
+
   endCurrentCall(reason?: string) {
     const current = callStore.getState();
     if (!current.session) {
@@ -736,6 +760,16 @@ class CallService {
 
     if (signal.type === 'answer' && signal.sdp) {
       if (!this.peer || this.peerCallId !== callId) {
+        return;
+      }
+
+      if (this.peer.signalingState !== 'have-local-offer') {
+        this.traceCall(
+          callId,
+          'mobile.signal.duplicate_answer',
+          `Se ignoró answer duplicado (signalingState=${this.peer.signalingState})`,
+          'warn',
+        );
         return;
       }
 
