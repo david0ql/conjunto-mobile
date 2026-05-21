@@ -15,6 +15,7 @@ import { AssemblyVotingScreen } from '../screens/AssemblyVotingScreen';
 import { PorteroPackagesScreen } from '../screens/PorteroPackagesScreen';
 import { PorteroLinesScreen } from '../screens/PorteroLinesScreen';
 import { PorteroCallScreen } from '../screens/PorteroCallScreen';
+import { CallOverlayScreen } from '../screens/CallOverlayScreen';
 
 function withSafeArea<P extends object>(Component: React.ComponentType<P>): React.ComponentType<P> {
   return (props: P) => (
@@ -38,4 +39,5 @@ export function registerScreens() {
   Navigation.registerComponent(COMPONENTS.porteroPackages, () => withSafeArea(PorteroPackagesScreen));
   Navigation.registerComponent(COMPONENTS.porteroLines, () => withSafeArea(PorteroLinesScreen));
   Navigation.registerComponent(COMPONENTS.porteroCall, () => withSafeArea(PorteroCallScreen));
+  Navigation.registerComponent(COMPONENTS.callOverlay, () => CallOverlayScreen);
 }

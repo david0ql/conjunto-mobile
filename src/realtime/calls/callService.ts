@@ -3,7 +3,9 @@ import type { Event as NotifeeEvent } from '@notifee/react-native';
 import messaging, { type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { AppState, PermissionsAndroid, Platform, type AppStateStatus } from 'react-native';
 import InCallManager from 'react-native-incall-manager';
+import { Navigation } from 'react-native-navigation';
 import VoipPushNotification from 'react-native-voip-push-notification';
+import { COMPONENTS } from '../../navigation/componentNames';
 import {
   mediaDevices,
   RTCIceCandidate,
@@ -204,6 +206,7 @@ class CallService {
         this.traceCall(current.session.id, 'mobile.socket.error', 'Socket de llamadas reportó un error', 'error');
       }
       callStore.reset();
+      void Navigation.dismissOverlay('CallOverlay');
     });
 
     // NestJS emits 'exception' when a @SubscribeMessage handler throws WsException.
@@ -227,6 +230,7 @@ class CallService {
         void callNative.endCall(callId, CALL_END_REASONS.FAILED).catch(() => undefined);
       }
       callStore.reset();
+      void Navigation.dismissOverlay('CallOverlay');
     });
 
     void this.refreshPorters().catch(() => undefined);
@@ -245,6 +249,7 @@ class CallService {
     this.deferredAnswerCallId = null;
     this.deferredEndCallId = null;
     callStore.reset();
+    void Navigation.dismissOverlay('CallOverlay');
     this.setPorters([]);
     void this.clearPendingIncomingCall();
     void callNative.teardownSystemState();
@@ -308,6 +313,7 @@ class CallService {
       this.stopAudioModes();
       this.teardownRtc();
       callStore.reset();
+      void Navigation.dismissOverlay('CallOverlay');
       throw error;
     }
   }
@@ -348,6 +354,7 @@ class CallService {
       this.stopAudioModes();
       this.teardownRtc();
       callStore.reset();
+      void Navigation.dismissOverlay('CallOverlay');
       throw error;
     }
   }
@@ -393,6 +400,7 @@ class CallService {
       this.stopAudioModes();
       this.teardownRtc();
       callStore.reset();
+      void Navigation.dismissOverlay('CallOverlay');
       throw error;
     }
   }
@@ -444,6 +452,7 @@ class CallService {
       );
       await callNative.endCall(current.session.id, CALL_END_REASONS.FAILED);
       callStore.reset();
+      void Navigation.dismissOverlay('CallOverlay');
     }
   }
 
@@ -461,6 +470,7 @@ class CallService {
     this.stopAudioModes();
     void this.clearPendingIncomingCall(current.session.id);
     void callNative.endCall(current.session.id, CALL_END_REASONS.UNANSWERED);
+    void Navigation.dismissOverlay('CallOverlay');
     void this.ensureRealtimeReady()
       .then(() => {
         this.socket?.emit('calls:reject', {
@@ -483,6 +493,7 @@ class CallService {
     this.stopAudioModes();
     void this.clearPendingIncomingCall(current.session.id);
     void callNative.endCall(current.session.id, CALL_END_REASONS.REMOTE_ENDED);
+    void Navigation.dismissOverlay('CallOverlay');
     void this.ensureRealtimeReady()
       .then(() => {
         this.socket?.emit('calls:end', {
@@ -548,6 +559,22 @@ class CallService {
       'info',
       { source, presentSystemCall },
     );
+
+    void Navigation.showOverlay({
+      component: {
+        name: COMPONENTS.callOverlay,
+        id: 'CallOverlay',
+        options: {
+          layout: {
+            backgroundColor: 'transparent',
+            componentBackgroundColor: 'transparent',
+          },
+          overlay: {
+            interceptTouchOutside: false,
+          },
+        },
+      },
+    });
 
     if (Platform.OS === 'android' && this.appState === 'active') {
       InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
@@ -822,6 +849,7 @@ class CallService {
     this.teardownRtc();
     await this.clearPendingIncomingCall(session.id);
     this.recentSystemAnswerByCallId.delete(session.id);
+    void Navigation.dismissOverlay('CallOverlay');
 
     const reason =
       session.endedReason === 'answered_elsewhere'

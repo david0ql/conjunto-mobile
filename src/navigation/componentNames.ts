@@ -12,6 +12,7 @@ export const COMPONENTS = {
   porteroPackages: 'app.porteroPackages',
   porteroLines: 'app.porteroLines',
   porteroCall: 'app.porteroCall',
+  callOverlay: 'app.callOverlay',
 } as const;
 
 export type ComponentName = (typeof COMPONENTS)[keyof typeof COMPONENTS];
