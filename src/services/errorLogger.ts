@@ -54,57 +54,75 @@ function getDeviceInfo(): string {
 
 export const errorLogger = {
   report(error: unknown, screen?: string) {
-    const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
-    const stack = error instanceof Error ? error.stack : undefined;
-    const user = authStore.getUser();
-    enqueue({
-      message,
-      stack,
-      screen,
-      deviceInfo: getDeviceInfo(),
-      userId: user?.id,
-      userType: user?.type,
-    });
+    try {
+      const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+      const stack = error instanceof Error ? error.stack : undefined;
+      let user: { id?: string; type?: string } | null = null;
+      try { user = authStore.getUser(); } catch {}
+      enqueue({
+        message,
+        stack,
+        screen,
+        deviceInfo: getDeviceInfo(),
+        userId: user?.id,
+        userType: user?.type,
+      });
+    } catch {}
   },
 
   init() {
-    const origError = console.error;
-    console.error = (...args: unknown[]) => {
-      origError.apply(console, args);
-      const message = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-      enqueue({ message, deviceInfo: getDeviceInfo() });
-    };
+    try {
+      const origError = console.error;
+      console.error = (...args: unknown[]) => {
+        try {
+          origError.apply(console, args);
+          const message = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+          enqueue({ message, deviceInfo: getDeviceInfo() });
+        } catch {}
+      };
 
-    const origWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      origWarn.apply(console, args);
-      const message = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-      if (message.includes('call') || message.includes('socket') || message.includes('webrtc')) {
-        enqueue({ message, deviceInfo: getDeviceInfo() });
+      const origWarn = console.warn;
+      console.warn = (...args: unknown[]) => {
+        try {
+          origWarn.apply(console, args);
+          const message = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+          if (message.includes('call') || message.includes('socket') || message.includes('webrtc')) {
+            enqueue({ message, deviceInfo: getDeviceInfo() });
+          }
+        } catch {}
+      };
+
+      if (typeof globalThis.onunhandledrejection === 'undefined' && typeof ErrorUtils !== 'undefined') {
+        globalThis.onunhandledrejection = (event: PromiseRejectionEvent) => {
+          try {
+            const reason = event.reason;
+            enqueue({ message: reason?.message ?? String(reason), stack: reason?.stack, deviceInfo: getDeviceInfo() });
+          } catch {}
+        };
       }
-    };
 
-    if (ErrorUtils?.setGlobalHandler) {
-      ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
-        enqueue({
-          message: error.message,
-          stack: error.stack,
-          deviceInfo: getDeviceInfo(),
-        });
-        if (isFatal) {
-          origError('[FATAL]', error);
+      try {
+        const EH = (ErrorUtils as any)?.getGlobalHandler?.() as ((...a: unknown[]) => void) | undefined;
+        const setter = (ErrorUtils as any)?.setGlobalHandler as ((h: (...a: unknown[]) => void) => void) | undefined;
+        if (setter) {
+          setter((error: Error, isFatal?: boolean) => {
+            try {
+              enqueue({ message: error.message, stack: error.stack, deviceInfo: getDeviceInfo() });
+            } catch {}
+            if (typeof EH === 'function') EH(error, isFatal);
+          });
         }
-      });
-    }
+      } catch {}
 
-    if (typeof globalThis.__ErrorUtils !== 'undefined') {
-      globalThis.__ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
-        enqueue({
-          message: error.message,
-          stack: error.stack,
-          deviceInfo: getDeviceInfo(),
+      if (typeof (globalThis as any)?.__ErrorUtils?.setGlobalHandler === 'function') {
+        const orig = (globalThis as any).__ErrorUtils.getGlobalHandler?.();
+        (globalThis as any).__ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+          try {
+            enqueue({ message: error.message, stack: error.stack, deviceInfo: getDeviceInfo() });
+          } catch {}
+          if (typeof orig === 'function') orig(error, isFatal);
         });
-      });
-    }
+      }
+    } catch {}
   },
 };

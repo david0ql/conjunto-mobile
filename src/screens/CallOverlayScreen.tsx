@@ -19,7 +19,7 @@ export function CallOverlayScreen() {
   const phase = call.phase;
 
   const handleDismiss = useCallback(() => {
-    Navigation.dismissOverlay('CallOverlay');
+    try { Navigation.dismissOverlay('CallOverlay').catch(() => {}); } catch {}
   }, []);
 
   const handleAnswer = useCallback(() => {
@@ -49,7 +49,7 @@ export function CallOverlayScreen() {
 
   useEffect(() => {
     if (phase === 'idle' || phase === 'ended' || phase === 'error') {
-      Navigation.dismissOverlay('CallOverlay');
+      try { Navigation.dismissOverlay('CallOverlay').catch(() => {}); } catch {}
     }
   }, [phase]);
 
