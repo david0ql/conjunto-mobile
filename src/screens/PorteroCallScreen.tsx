@@ -5,6 +5,7 @@ import {
   FlatList,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -75,22 +76,27 @@ export function PorteroCallScreen({ componentId: _componentId }: NavigationCompo
           <ActivityIndicator color={noirTheme.primary} />
         </View>
       ) : (
-        <View style={styles.towerRow}>
-          {towers.map((t) => (
-            <TouchableOpacity
-              key={t.id}
-              style={[styles.towerChip, selectedTower?.id === t.id && styles.towerChipActive]}
-              onPress={() => handleSelectTower(t)}>
-              <Text
-                style={[
-                  styles.towerChipText,
-                  selectedTower?.id === t.id && styles.towerChipTextActive,
-                ]}>
-                {t.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.towerScrollContent}>
+          <View style={styles.towerRow}>
+            {towers.map((t) => (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.towerChip, selectedTower?.id === t.id && styles.towerChipActive]}
+                onPress={() => handleSelectTower(t)}>
+                <Text
+                  style={[
+                    styles.towerChipText,
+                    selectedTower?.id === t.id && styles.towerChipTextActive,
+                  ]}>
+                  {t.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
       )}
 
       {/* Apartment grid */}
@@ -164,14 +170,16 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     textTransform: 'uppercase',
   },
+  towerScrollContent: {
+    borderBottomWidth: 1,
+    borderBottomColor: noirTheme.outline,
+    backgroundColor: noirTheme.surfaceLow,
+  },
   towerRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
     paddingVertical: 12,
     gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: noirTheme.outline,
-    backgroundColor: noirTheme.surfaceLow,
   },
   towerChip: {
     paddingHorizontal: 16,

@@ -35,6 +35,8 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
+	<key>NSCameraUsageDescription</key>
+	<string>Necesitamos la cámara para tomar fotos de los paquetes y comprobantes de entrega.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Necesitamos el microfono para atender llamadas del intercom residencial.</string>
 	<key>RCTNewArchEnabled</key>
