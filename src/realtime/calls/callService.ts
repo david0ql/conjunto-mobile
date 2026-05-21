@@ -79,6 +79,7 @@ class CallService {
   private recentSystemAnswerByCallId = new Map<string, number>();
   private localMediaSetupPromise: Promise<boolean> | null = null;
   private localMediaSetupCallId: string | null = null;
+  private answerProcessingCallId: string | null = null;
 
   bootstrap() {
     if (this.bootstrapped) {
@@ -306,6 +307,10 @@ class CallService {
         video: false,
       });
 
+      InCallManager.start({ media: 'audio', auto: true });
+      InCallManager.setKeepScreenOn(true);
+      InCallManager.setForceSpeakerphoneOn(true);
+
       this.socket.emit('calls:call-porter', { employeeId });
     } catch (error) {
       this.stopAudioModes();
@@ -346,6 +351,10 @@ class CallService {
         audio: true,
         video: false,
       });
+
+      InCallManager.start({ media: 'audio', auto: true });
+      InCallManager.setKeepScreenOn(true);
+      InCallManager.setForceSpeakerphoneOn(true);
 
       this.socket.emit('calls:initiate', { apartmentId });
     } catch (error) {
@@ -393,6 +402,10 @@ class CallService {
         video: false,
       });
 
+      InCallManager.start({ media: 'audio', auto: true });
+      InCallManager.setKeepScreenOn(true);
+      InCallManager.setForceSpeakerphoneOn(true);
+
       this.socket.emit('calls:initiate-porter', { employeeId });
     } catch (error) {
       this.stopAudioModes();
@@ -410,22 +423,27 @@ class CallService {
       return;
     }
 
+    if (current.phase !== 'incoming' && current.phase !== 'requesting-media') {
+      return;
+    }
+
     if (fromSystem) {
       this.traceCall(current.session.id, 'mobile.system.answer_processing', 'Procesando respuesta desde UI nativa');
     }
 
     try {
-      if (!fromSystem) {
-        await callNative.answerIncomingCall(current.session.id);
-      }
-
-      await this.ensureRealtimeReady();
       callStore.patch({
         phase: 'connecting',
         muted: false,
         speaker: true,
         error: null,
       });
+
+      if (!fromSystem) {
+        await callNative.answerIncomingCall(current.session.id);
+      }
+
+      await this.ensureRealtimeReady();
       this.traceCall(current.session.id, 'mobile.accept.sent', 'Llamada aceptada en móvil, esperando oferta WebRTC');
       this.socket?.emit('calls:accept', {
         callId: current.session.id,
@@ -628,6 +646,11 @@ class CallService {
   }
 
   private async handleAccepted(session: CallSessionPayload) {
+    const current = callStore.getState();
+    if (current.session?.id === session.id && (current.phase === 'connecting' || current.phase === 'active')) {
+      return;
+    }
+
     const currentUser = authStore.getUser();
     const startedAt = this.getSessionStartedAt(session);
 
@@ -648,6 +671,9 @@ class CallService {
         startedAt,
       });
       await callNative.markCallConnecting(session, startedAt);
+      InCallManager.start({ media: 'audio', auto: true });
+      InCallManager.setKeepScreenOn(true);
+      InCallManager.setForceSpeakerphoneOn(true);
       this.traceCall(session.id, 'mobile.accept.confirmed', 'Evento accepted recibido para llamada outbound');
       return;
     }
@@ -763,6 +789,16 @@ class CallService {
         return;
       }
 
+      if (this.answerProcessingCallId === callId) {
+        this.traceCall(
+          callId,
+          'mobile.signal.duplicate_answer_processing',
+          `Se ignoró answer duplicado (ya procesando)`,
+          'warn',
+        );
+        return;
+      }
+
       if (this.peer.signalingState !== 'have-local-offer') {
         this.traceCall(
           callId,
@@ -773,18 +809,23 @@ class CallService {
         return;
       }
 
-      await this.peer.setRemoteDescription(
-        new RTCSessionDescription({
-          type: 'answer',
-          sdp: signal.sdp,
-        }),
-      );
-      await this.flushPendingRemoteCandidates(this.peer);
-      const startedAt = current.startedAt ?? Date.now();
-      callStore.patch({ phase: 'active', error: null, startedAt });
-      await callNative.markCallActive(current.session, startedAt);
-      this.clearOfferRetryRequest(callId);
-      this.traceCall(callId, 'mobile.call.active', 'Respuesta remota recibida, llamada activa');
+      this.answerProcessingCallId = callId;
+      try {
+        await this.peer.setRemoteDescription(
+          new RTCSessionDescription({
+            type: 'answer',
+            sdp: signal.sdp,
+          }),
+        );
+        await this.flushPendingRemoteCandidates(this.peer);
+        const startedAt = current.startedAt ?? Date.now();
+        callStore.patch({ phase: 'active', error: null, startedAt });
+        await callNative.markCallActive(current.session, startedAt);
+        this.clearOfferRetryRequest(callId);
+        this.traceCall(callId, 'mobile.call.active', 'Respuesta remota recibida, llamada activa');
+      } finally {
+        this.answerProcessingCallId = null;
+      }
       return;
     }
 
