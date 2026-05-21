@@ -2356,7 +2356,7 @@ SPEC CHECKSUMS:
   FirebaseMessaging: ed18fb50634e6e85b5d3e77e628c21e2c928cc53
   GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7
   GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
-  hermes-engine: 5516898bd14e31255a082cd93b6e46fc09e282ff
+  hermes-engine: 8eb41e3d754d24acd9376b678316eda052ad4ed4
   HMSegmentedControl: 34c1f54d822d8308e7b24f5d901ec674dfa31352
   JitsiWebRTC: b47805ab5668be38e7ee60e2258f49badfe8e1d0
   nanopb: fad817b59e0457d11a5dfbde799381cd727c1275
@@ -2369,7 +2369,7 @@ SPEC CHECKSUMS:
   React: 1ba7d364ade7d883a1ec055bfc3606f35fdee17b
   React-callinvoker: bc2a26f8d84fb01f003fc6de6c9337b64715f95b
   React-Core: 7840d3a80b43a95c5e80ef75146bd70925ebab0f
-  React-Core-prebuilt: a09f8130592ea36abc470952ec8df5329d767a23
+  React-Core-prebuilt: eb105a4dd0b253052655137d253fb23f5e002ac0
   React-CoreModules: 2eb010400b63b89e53a324ffb3c112e4c7c3ce42
   React-cxxreact: a558e92199d26f145afa9e62c4233cf8e7950efe
   React-debug: 755200a6e7f5e6e0a40ff8d215493d43cce285fc
@@ -2433,7 +2433,7 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: e96e93b493d8d86eeaee3e590ba0be53f6abe46f
   ReactCodegen: 797de5178718324c6eba3327b07f9a423fbd5787
   ReactCommon: 07572bf9e687c8a52fbe4a3641e9e3a1a477c78e
-  ReactNativeDependencies: f9f37c6f4f70a78c396754ce2fe097b0a995352f
+  ReactNativeDependencies: 9ed09791a0ce61425f4b13138fb2a8e698fa078b
   ReactNativeIncallManager: dccd3e7499caa3bb73d3acfedf4fb0360f1a87d5
   ReactNativeNavigation: 9da1ac2167456405089828fc8677e804796f17e3
   RNCallKeep: 1930a01d8caf48f018be4f2db0c9f03405c2f977
