@@ -190,6 +190,8 @@ function buildMainTabsRoot(selectedTab: (typeof MAIN_TABS)[number]) {
 
 function buildPorteroTabsRoot() {
   const packagesIcon = (MaterialIcons as any).getImageSourceSync('inventory-2', 20, noirTheme.primary);
+  const linesIcon = (MaterialIcons as any).getImageSourceSync('phone-in-talk', 20, noirTheme.primary);
+  const callIcon = (MaterialIcons as any).getImageSourceSync('apartment', 20, noirTheme.primary);
   return {
     root: {
       bottomTabs: {
@@ -218,6 +220,44 @@ function buildPorteroTabsRoot() {
                   text: 'Paquetes',
                   icon: packagesIcon,
                   selectedIcon: packagesIcon,
+                  fontSize: 9,
+                  selectedFontSize: 9,
+                  iconColor: noirTheme.secondary,
+                  selectedIconColor: noirTheme.primary,
+                  textColor: noirTheme.secondary,
+                  selectedTextColor: noirTheme.primary,
+                },
+              },
+            },
+          },
+          {
+            stack: {
+              id: 'tab.portero.lines.stack',
+              children: [stackComponent(COMPONENTS.porteroLines)],
+              options: {
+                bottomTab: {
+                  text: 'Portería',
+                  icon: linesIcon,
+                  selectedIcon: linesIcon,
+                  fontSize: 9,
+                  selectedFontSize: 9,
+                  iconColor: noirTheme.secondary,
+                  selectedIconColor: noirTheme.primary,
+                  textColor: noirTheme.secondary,
+                  selectedTextColor: noirTheme.primary,
+                },
+              },
+            },
+          },
+          {
+            stack: {
+              id: 'tab.portero.call.stack',
+              children: [stackComponent(COMPONENTS.porteroCall)],
+              options: {
+                bottomTab: {
+                  text: 'Llamar',
+                  icon: callIcon,
+                  selectedIcon: callIcon,
                   fontSize: 9,
                   selectedFontSize: 9,
                   iconColor: noirTheme.secondary,

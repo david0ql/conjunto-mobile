@@ -302,13 +302,93 @@ class CallService {
         audio: true,
         video: false,
       });
-      // NOTE: InCallManager.start() is intentionally NOT called here.
-      // On iOS, calling it before RNCallKeep.startCall() conflicts with
-      // CallKit's AVAudioSession ownership and causes CallKit to fire endCall
-      // ~1.25s later. InCallManager is started in handleAccepted() once
-      // CallKit has already taken the audio session.
 
       this.socket.emit('calls:call-porter', { employeeId });
+    } catch (error) {
+      this.stopAudioModes();
+      this.teardownRtc();
+      callStore.reset();
+      throw error;
+    }
+  }
+
+  async startApartmentCall(apartmentId: string) {
+    const current = callStore.getState();
+    if (current.phase !== 'idle') {
+      throw new Error('Ya existe una llamada en curso');
+    }
+
+    await this.ensureRealtimeReady();
+    if (!this.socket || this.socket.disconnected) {
+      throw new Error('El canal en tiempo real no está conectado');
+    }
+
+    const hasPermission = await this.ensureMicrophonePermission();
+    if (!hasPermission) {
+      throw new Error('Debes habilitar el micrófono para llamar');
+    }
+
+    callStore.setState({
+      session: null,
+      phase: 'requesting-media',
+      muted: false,
+      speaker: true,
+      error: null,
+      startedAt: null,
+    });
+
+    try {
+      this.localStream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+
+      this.socket.emit('calls:initiate', { apartmentId });
+    } catch (error) {
+      this.stopAudioModes();
+      this.teardownRtc();
+      callStore.reset();
+      throw error;
+    }
+  }
+
+  async startEmployeeCall(employeeId: string) {
+    const current = callStore.getState();
+    if (current.phase !== 'idle') {
+      throw new Error('Ya existe una llamada en curso');
+    }
+
+    await this.ensureRealtimeReady();
+    if (!this.socket || this.socket.disconnected) {
+      throw new Error('El canal en tiempo real no está conectado');
+    }
+
+    const user = authStore.getUser();
+    if (user?.id === employeeId) {
+      throw new Error('No puedes llamarte a ti mismo');
+    }
+
+    const hasPermission = await this.ensureMicrophonePermission();
+    if (!hasPermission) {
+      throw new Error('Debes habilitar el micrófono para llamar');
+    }
+
+    callStore.setState({
+      session: null,
+      phase: 'requesting-media',
+      muted: false,
+      speaker: true,
+      error: null,
+      startedAt: null,
+    });
+
+    try {
+      this.localStream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+
+      this.socket.emit('calls:initiate-porter', { employeeId });
     } catch (error) {
       this.stopAudioModes();
       this.teardownRtc();
@@ -428,10 +508,6 @@ class CallService {
   }
 
   private async handleOutgoing(session: CallSessionPayload) {
-    if (session.direction !== 'inbound') {
-      return;
-    }
-
     await callNative.startOutgoingCall(session);
     callStore.patch({
       session,
@@ -448,10 +524,6 @@ class CallService {
     source: PendingCallRecord['source'],
     presentSystemCall = true,
   ) {
-    if (session.direction !== 'outbound') {
-      return;
-    }
-
     const current = callStore.getState();
     if (
       current.session?.id === session.id &&
@@ -1045,6 +1117,7 @@ class CallService {
     const user = authStore.getUser();
     const shouldStartOffer =
       current.session.direction === 'inbound' ||
+      current.session.direction === 'outbound' ||
       (current.session.direction === 'internal' && user?.id === current.session.initiatedByEmployeeId);
     if (!shouldStartOffer) {
       return;

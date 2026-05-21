@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { NavigationComponentProps } from 'react-native-navigation';
+import { launchCamera } from 'react-native-image-picker';
 import { noirTheme } from '../design/theme';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
@@ -203,6 +204,7 @@ function CreatePackageModal({
   const [apartments, setApartments] = useState<ApartmentItem[]>([]);
   const [selectedApt, setSelectedApt] = useState<ApartmentItem | null>(null);
   const [description, setDescription] = useState('');
+  const [photo, setPhoto] = useState<{ uri: string; fileName: string; type: string } | null>(null);
   const [loadingTowers, setLoadingTowers] = useState(false);
   const [loadingApts, setLoadingApts] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -232,8 +234,30 @@ function CreatePackageModal({
     setSelectedApt(null);
     setApartments([]);
     setDescription('');
+    setPhoto(null);
     setSubmitting(false);
     onClose();
+  }
+
+  async function handleTakePhoto() {
+    try {
+      const result = await launchCamera({
+        mediaType: 'photo',
+        quality: 0.7,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        saveToPhotos: false,
+      });
+      if (result.didCancel || !result.assets?.[0]?.uri) return;
+      const asset = result.assets[0];
+      setPhoto({
+        uri: asset.uri,
+        fileName: asset.fileName ?? `paquete_${Date.now()}.jpg`,
+        type: asset.type ?? 'image/jpeg',
+      });
+    } catch {
+      Alert.alert('Error', 'No fue posible abrir la cámara.');
+    }
   }
 
   async function handleSubmit() {
@@ -241,9 +265,17 @@ function CreatePackageModal({
       Alert.alert('Falta apartamento', 'Selecciona un apartamento.');
       return;
     }
+    if (!photo) {
+      Alert.alert('Foto requerida', 'Debes tomar una foto del paquete.');
+      return;
+    }
     setSubmitting(true);
     try {
-      await createPorterPackage({ apartmentId: selectedApt.id, description: description.trim() || undefined });
+      await createPorterPackage({
+        apartmentId: selectedApt.id,
+        description: description.trim() || undefined,
+        photo,
+      });
       handleClose();
       onCreated();
     } catch {
@@ -320,6 +352,25 @@ function CreatePackageModal({
               </>
             )}
 
+            {/* Photo */}
+            <Text style={[styles.modalSectionLabel, { marginTop: 20 }]}>
+              Foto <Text style={styles.labelRequired}>(obligatorio)</Text>
+            </Text>
+            {photo ? (
+              <View style={styles.photoPreviewContainer}>
+                <Image source={{ uri: photo.uri }} style={styles.photoPreviewImg} resizeMode="cover" />
+                <TouchableOpacity style={styles.photoRetakeBtn} onPress={handleTakePhoto}>
+                  <MaterialIcons name="camera-alt" size={16} color="#000" />
+                  <Text style={styles.photoRetakeText}>Retomar</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.cameraBtn} onPress={handleTakePhoto}>
+                <MaterialIcons name="camera-alt" size={32} color={noirTheme.secondary} />
+                <Text style={styles.cameraBtnText}>Tomar foto del paquete</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Description */}
             <Text style={[styles.modalSectionLabel, { marginTop: 20 }]}>
               Descripción <Text style={styles.labelOptional}>(opcional)</Text>
@@ -337,9 +388,9 @@ function CreatePackageModal({
 
             {/* Submit */}
             <TouchableOpacity
-              style={[styles.submitBtn, (!selectedApt || submitting) && styles.submitBtnDisabled]}
+              style={[styles.submitBtn, (!selectedApt || !photo || submitting) && styles.submitBtnDisabled]}
               onPress={handleSubmit}
-              disabled={!selectedApt || submitting}>
+              disabled={!selectedApt || !photo || submitting}>
               {submitting ? (
                 <ActivityIndicator color="#000" />
               ) : (
@@ -366,13 +417,44 @@ function DeliverModal({
   onClose: () => void;
   onDelivered: () => void;
 }) {
+  const [photo, setPhoto] = useState<{ uri: string; fileName: string; type: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!pkg) setPhoto(null);
+  }, [pkg]);
+
+  async function handleTakePhoto() {
+    try {
+      const result = await launchCamera({
+        mediaType: 'photo',
+        quality: 0.7,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        saveToPhotos: false,
+      });
+      if (result.didCancel || !result.assets?.[0]?.uri) return;
+      const asset = result.assets[0];
+      setPhoto({
+        uri: asset.uri,
+        fileName: asset.fileName ?? `entrega_${Date.now()}.jpg`,
+        type: asset.type ?? 'image/jpeg',
+      });
+    } catch {
+      Alert.alert('Error', 'No fue posible abrir la cámara.');
+    }
+  }
 
   async function handleConfirm() {
     if (!pkg) return;
+    if (!photo) {
+      Alert.alert('Foto requerida', 'Debes tomar una foto como comprobante de entrega.');
+      return;
+    }
     setSubmitting(true);
     try {
-      await markPorterPackageDelivered(pkg.id);
+      await markPorterPackageDelivered(pkg.id, photo);
+      setPhoto(null);
       onDelivered();
     } catch {
       Alert.alert('Error', 'No fue posible marcar el paquete como entregado.');
@@ -394,47 +476,68 @@ function DeliverModal({
             </TouchableOpacity>
           </View>
 
-          <View style={styles.deliverBody}>
-            <View style={styles.deliverAptTag}>
-              <MaterialIcons name="apartment" size={16} color={noirTheme.secondary} />
-              <Text style={styles.deliverAptText}>{pkg ? getAptLabel(pkg) : ''}</Text>
-            </View>
+          <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+            <View style={styles.deliverBody}>
+              <View style={styles.deliverAptTag}>
+                <MaterialIcons name="apartment" size={16} color={noirTheme.secondary} />
+                <Text style={styles.deliverAptText}>{pkg ? getAptLabel(pkg) : ''}</Text>
+              </View>
 
-            <Text style={styles.deliverDescription}>
-              {pkg?.description?.trim() || 'Sin descripción'}
-            </Text>
-
-            <Text style={styles.deliverDateText}>
-              Llegó: {pkg ? formatDate(pkg.arrivalTime) : ''}
-            </Text>
-
-            <View style={styles.deliverNotice}>
-              <MaterialIcons name="info-outline" size={14} color="#f59e0b" />
-              <Text style={styles.deliverNoticeText}>
-                Esta acción marcará el paquete como entregado. Esta operación no se puede deshacer.
+              <Text style={styles.deliverDescription}>
+                {pkg?.description?.trim() || 'Sin descripción'}
               </Text>
-            </View>
 
-            <View style={styles.deliverActions}>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={onClose}
-                disabled={submitting}>
-                <Text style={styles.cancelBtnText}>Cancelar</Text>
-              </TouchableOpacity>
+              <Text style={styles.deliverDateText}>
+                Llegó: {pkg ? formatDate(pkg.arrivalTime) : ''}
+              </Text>
 
-              <TouchableOpacity
-                style={[styles.confirmBtn, submitting && styles.submitBtnDisabled]}
-                onPress={handleConfirm}
-                disabled={submitting}>
-                {submitting ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.submitBtnText}>Confirmar entrega</Text>
-                )}
-              </TouchableOpacity>
+              {/* Photo */}
+              <Text style={[styles.modalSectionLabel, { marginTop: 8 }]}>
+                Foto de entrega <Text style={styles.labelRequired}>(obligatorio)</Text>
+              </Text>
+              {photo ? (
+                <View style={styles.photoPreviewContainer}>
+                  <Image source={{ uri: photo.uri }} style={styles.photoPreviewImg} resizeMode="cover" />
+                  <TouchableOpacity style={styles.photoRetakeBtn} onPress={handleTakePhoto}>
+                    <MaterialIcons name="camera-alt" size={16} color="#000" />
+                    <Text style={styles.photoRetakeText}>Retomar</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.cameraBtn} onPress={handleTakePhoto}>
+                  <MaterialIcons name="camera-alt" size={28} color={noirTheme.secondary} />
+                  <Text style={styles.cameraBtnText}>Tomar foto de entrega</Text>
+                </TouchableOpacity>
+              )}
+
+              <View style={styles.deliverNotice}>
+                <MaterialIcons name="info-outline" size={14} color="#f59e0b" />
+                <Text style={styles.deliverNoticeText}>
+                  Esta acción marcará el paquete como entregado. Esta operación no se puede deshacer.
+                </Text>
+              </View>
+
+              <View style={styles.deliverActions}>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  onPress={onClose}
+                  disabled={submitting}>
+                  <Text style={styles.cancelBtnText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.confirmBtn, (!photo || submitting) && styles.submitBtnDisabled]}
+                  onPress={handleConfirm}
+                  disabled={!photo || submitting}>
+                  {submitting ? (
+                    <ActivityIndicator color="#000" />
+                  ) : (
+                    <Text style={styles.submitBtnText}>Confirmar entrega</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -1115,7 +1218,7 @@ const styles = StyleSheet.create({
     borderColor: noirTheme.outline,
   },
   modalSheetSmall: {
-    maxHeight: '55%',
+    maxHeight: '80%',
   },
   modalSheetTall: {
     height: '80%',
@@ -1171,6 +1274,54 @@ const styles = StyleSheet.create({
     color: noirTheme.surfaceHighest,
     fontWeight: '400',
     letterSpacing: 0,
+  },
+  labelRequired: {
+    color: '#f59e0b',
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  cameraBtn: {
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 8,
+    backgroundColor: noirTheme.surfaceHigh,
+    borderWidth: 1,
+    borderColor: noirTheme.outline,
+    borderStyle: 'dashed',
+  },
+  cameraBtnText: {
+    color: noirTheme.secondary,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  photoPreviewContainer: {
+    gap: 8,
+  },
+  photoPreviewImg: {
+    width: '100%',
+    height: 180,
+    borderRadius: 8,
+    backgroundColor: noirTheme.surfaceHigh,
+  },
+  photoRetakeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: noirTheme.primary,
+  },
+  photoRetakeText: {
+    color: '#000',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   towerGrid: {
     flexDirection: 'row',

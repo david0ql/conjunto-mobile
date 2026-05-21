@@ -10,6 +10,8 @@ export const COMPONENTS = {
   profileQr: 'app.profileQr',
   assemblyVoting: 'app.assemblyVoting',
   porteroPackages: 'app.porteroPackages',
+  porteroLines: 'app.porteroLines',
+  porteroCall: 'app.porteroCall',
 } as const;
 
 export type ComponentName = (typeof COMPONENTS)[keyof typeof COMPONENTS];

@@ -558,15 +558,34 @@ export async function getPorterPackages(params: {
 export async function createPorterPackage(payload: {
   apartmentId: string;
   description?: string;
+  photo?: { uri: string; fileName: string; type: string } | null;
 }): Promise<PorterPackageItem> {
   const fd = new FormData();
   fd.append('apartmentId', payload.apartmentId);
   if (payload.description?.trim()) fd.append('description', payload.description.trim());
+  if (payload.photo) {
+    fd.append('photos', {
+      uri: payload.photo.uri,
+      name: payload.photo.fileName,
+      type: payload.photo.type,
+    } as any);
+  }
   return requestMultipart<PorterPackageItem>('POST', '/packages', fd);
 }
 
-export async function markPorterPackageDelivered(id: string): Promise<PorterPackageItem> {
-  return requestMultipart<PorterPackageItem>('PATCH', `/packages/${id}/deliver`, new FormData());
+export async function markPorterPackageDelivered(
+  id: string,
+  photo?: { uri: string; fileName: string; type: string } | null,
+): Promise<PorterPackageItem> {
+  const fd = new FormData();
+  if (photo) {
+    fd.append('deliveryPhoto', {
+      uri: photo.uri,
+      name: photo.fileName,
+      type: photo.type,
+    } as any);
+  }
+  return requestMultipart<PorterPackageItem>('PATCH', `/packages/${id}/deliver`, fd);
 }
 
 // ─── Image URL helper ─────────────────────────────────────────────────────────
