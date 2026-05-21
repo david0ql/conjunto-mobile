@@ -206,6 +206,29 @@ class CallService {
       callStore.reset();
     });
 
+    // NestJS emits 'exception' when a @SubscribeMessage handler throws WsException.
+    // The most common case: calls:accept for a call that already ended on the server
+    // (porter hung up manually while the mobile was starting from killed state).
+    this.socket.on('exception', (data: unknown) => {
+      const current = callStore.getState();
+      if (current.phase !== 'connecting' && current.phase !== 'incoming') {
+        return;
+      }
+      const callId = current.session?.id;
+      const msg =
+        data && typeof data === 'object' && 'message' in data
+          ? String((data as { message?: unknown }).message)
+          : 'Server exception';
+      this.traceCall(callId ?? 'unknown', 'mobile.socket.exception', msg, 'error');
+      this.teardownRtc();
+      this.stopAudioModes();
+      if (callId) {
+        void this.clearPendingIncomingCall(callId);
+        void callNative.endCall(callId, CALL_END_REASONS.FAILED).catch(() => undefined);
+      }
+      callStore.reset();
+    });
+
     void this.refreshPorters().catch(() => undefined);
     void this.registerPushTokens().catch(() => undefined);
     void this.ensureBackgroundReadiness().catch((error) => {
@@ -279,9 +302,11 @@ class CallService {
         audio: true,
         video: false,
       });
-      InCallManager.start({ media: 'audio', auto: true });
-      InCallManager.setKeepScreenOn(true);
-      InCallManager.setForceSpeakerphoneOn(true);
+      // NOTE: InCallManager.start() is intentionally NOT called here.
+      // On iOS, calling it before RNCallKeep.startCall() conflicts with
+      // CallKit's AVAudioSession ownership and causes CallKit to fire endCall
+      // ~1.25s later. InCallManager is started in handleAccepted() once
+      // CallKit has already taken the audio session.
 
       this.socket.emit('calls:call-porter', { employeeId });
     } catch (error) {
@@ -518,6 +543,12 @@ class CallService {
       startedAt,
     });
     await callNative.markCallConnecting(session, startedAt);
+    // Start audio routing now — CallKit already owns the audio session at this
+    // point (reportConnectingOutgoingCallWithUUID was called in markCallConnecting),
+    // so InCallManager won't conflict with it.
+    InCallManager.start({ media: 'audio', auto: true });
+    InCallManager.setKeepScreenOn(true);
+    InCallManager.setForceSpeakerphoneOn(true);
     await this.startOfferForCall(session);
   }
 

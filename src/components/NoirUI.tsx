@@ -1,6 +1,8 @@
 import React from 'react';
 import {
   ImageBackground,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,6 +23,8 @@ type ScreenProps = {
   contentContainerStyle?: StyleProp<ViewStyle>;
   onRefresh?: () => void;
   refreshing?: boolean;
+  onEndReached?: () => void;
+  onEndReachedThreshold?: number;
 };
 
 type TopBarProps = {
@@ -42,11 +46,25 @@ export function NoirScreen({
   scroll = true,
   contentContainerStyle,
   onRefresh,
+  onEndReached,
+  onEndReachedThreshold = 0.5,
   refreshing = false,
 }: ScreenProps) {
+  function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    if (!onEndReached) return;
+
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    if (distanceFromEnd <= layoutMeasurement.height * onEndReachedThreshold) {
+      onEndReached();
+    }
+  }
+
   const content = scroll ? (
     <ScrollView
       contentContainerStyle={[styles.scrollContent, contentContainerStyle]}
+      onScroll={handleScroll}
+      scrollEventThrottle={16}
       showsVerticalScrollIndicator={false}
       refreshControl={
         onRefresh ? (
@@ -134,13 +152,15 @@ export function Divider() {
 
 export function HeroCard({
   image,
+  icon,
   label,
   title,
   subtitle,
   onPrimaryPress,
   onSecondaryPress,
 }: {
-  image: string;
+  image?: string;
+  icon?: string;
   label: string;
   title: string;
   subtitle: string;
@@ -148,8 +168,17 @@ export function HeroCard({
   onSecondaryPress?: () => void;
 }) {
   return (
-    <ImageBackground source={{ uri: image }} imageStyle={styles.heroImage} style={styles.heroCard}>
-      <View style={styles.heroOverlay} />
+    <ImageBackground
+      source={image ? { uri: image } : undefined}
+      imageStyle={styles.heroImage}
+      style={styles.heroCard}
+    >
+      {!image && icon ? (
+        <View style={styles.heroIconDecor}>
+          <MaterialIcons name={icon} size={160} color="rgba(255,255,255,0.05)" />
+        </View>
+      ) : null}
+      <View style={[styles.heroOverlay, !image && styles.heroOverlayFlat]} />
       <View style={styles.heroCardContent}>
         <Text style={styles.heroMeta}>{label}</Text>
         <Text style={styles.heroTitle}>{title}</Text>
@@ -277,9 +306,17 @@ const styles = StyleSheet.create({
   heroImage: {
     resizeMode: 'cover',
   },
+  heroIconDecor: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.44)',
+  },
+  heroOverlayFlat: {
+    backgroundColor: 'rgba(0,0,0,0)',
   },
   heroCardContent: {
     padding: 24,

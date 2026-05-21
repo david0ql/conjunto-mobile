@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   ImageBackground,
   Pressable,
   ScrollView,
@@ -19,30 +20,56 @@ import { noirTheme } from '../design/theme';
 import { COMPONENTS } from '../navigation/componentNames';
 import { pushScreen } from '../navigation/root';
 import { NavigationComponentProps } from 'react-native-navigation';
-import { getNews, resolveImageUrl, type NewsItem } from '../services/api';
+import { getNewsPage, resolveImageUrl, type NewsItem } from '../services/api';
 import { authStore } from '../context/auth.store';
+
+const PAGE_SIZE = 15;
 
 export function HomeNewsScreen({ componentId }: NavigationComponentProps) {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const pageRef = useRef(1);
+  const hasMoreRef = useRef(true);
+  const loadingMoreRef = useRef(false);
   const user = authStore.getUser();
 
-  function fetchNews(isRefresh = false) {
+  function fetchNews(nextPage = 1, isRefresh = false) {
     if (isRefresh) setRefreshing(true);
-    getNews()
-      .then((items) => setNews(items.slice(0, 10)))
+    if (nextPage === 1) setLoading(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
+
+    getNewsPage(nextPage, PAGE_SIZE)
+      .then((response) => {
+        setNews((current) => (nextPage === 1 ? response.data : [...current, ...response.data]));
+        pageRef.current = response.meta.page;
+        hasMoreRef.current = response.meta.page < response.meta.totalPages;
+      })
       .catch(() => {})
-      .finally(() => { setLoading(false); setRefreshing(false); });
+      .finally(() => {
+        setLoading(false);
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+        setRefreshing(false);
+      });
   }
 
   useEffect(() => { fetchNews(); }, []);
 
+  function loadMoreNews() {
+    if (loading || loadingMoreRef.current || refreshing || !hasMoreRef.current) return;
+    fetchNews(pageRef.current + 1);
+  }
+
   const recent = news.slice(0, 3);
-  const community = news.slice(0, 10);
+  const community = news;
 
   return (
-    <NoirScreen onRefresh={() => fetchNews(true)} refreshing={refreshing}>
+    <NoirScreen onRefresh={() => fetchNews(1, true)} onEndReached={loadMoreNews} refreshing={refreshing}>
       <NoirTopBar />
 
       <View style={styles.content}>
@@ -146,6 +173,7 @@ export function HomeNewsScreen({ componentId }: NavigationComponentProps) {
               </View>
             );
           })}
+          {loadingMore ? <ActivityIndicator color={noirTheme.primary} /> : null}
         </View>
       </View>
     </NoirScreen>

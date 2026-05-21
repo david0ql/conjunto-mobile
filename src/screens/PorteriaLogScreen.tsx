@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,7 +20,7 @@ import { noirTheme } from '../design/theme';
 import { callService } from '../realtime/calls/callService';
 import { callStore } from '../realtime/calls/callStore';
 import {
-  getMyPackages,
+  getMyPackagesPage,
   getMyAccessEntries,
   getMyApartments,
   getMyNotifications,
@@ -34,6 +34,8 @@ import {
   type ResidentApartment,
   type PorterAvailability,
 } from '../services/api';
+
+const PAGE_SIZE = 15;
 
 function formatRelativeTime(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -113,23 +115,36 @@ function PackagePhotosModal({
         <ScrollView contentContainerStyle={modalStyles.photoGrid}>
           {loading ? (
             <ActivityIndicator color={noirTheme.primary} size="large" style={{ marginTop: 40 }} />
-          ) : photos.length === 0 ? (
-            <View style={modalStyles.empty}>
-              <MaterialIcons color={noirTheme.surfaceHighest} name="image-not-supported" size={48} />
-              <Text style={modalStyles.emptyText}>Sin fotos registradas</Text>
-            </View>
           ) : (
-            photos.map((photo) => {
-              const uri = resolveImageUrl(photo.filePath);
-              return uri ? (
-                <Image
-                  key={photo.id}
-                  source={{ uri }}
-                  style={modalStyles.photo}
-                  resizeMode="cover"
-                />
-              ) : null;
-            })
+            <>
+              {pkg.deliveryPhotoPath ? (() => {
+                const uri = resolveImageUrl(pkg.deliveryPhotoPath);
+                return uri ? (
+                  <View key="delivery" style={modalStyles.deliveryPhotoWrap}>
+                    <Text style={modalStyles.deliveryLabel}>Foto de entrega</Text>
+                    <Image source={{ uri }} style={modalStyles.photo} resizeMode="cover" />
+                  </View>
+                ) : null;
+              })() : null}
+              {photos.length === 0 && !pkg.deliveryPhotoPath ? (
+                <View style={modalStyles.empty}>
+                  <MaterialIcons color={noirTheme.surfaceHighest} name="image-not-supported" size={48} />
+                  <Text style={modalStyles.emptyText}>Sin fotos registradas</Text>
+                </View>
+              ) : (
+                photos.map((photo) => {
+                  const uri = resolveImageUrl(photo.filePath);
+                  return uri ? (
+                    <Image
+                      key={photo.id}
+                      source={{ uri }}
+                      style={modalStyles.photo}
+                      resizeMode="cover"
+                    />
+                  ) : null;
+                })
+              )}
+            </>
           )}
         </ScrollView>
       </View>
@@ -151,6 +166,10 @@ export function PorteriaLogScreen() {
   const [portersError, setPortersError] = useState<string | null>(null);
   const [selectedAptIdx, setSelectedAptIdx] = useState(0);
   const [loadingPackages, setLoadingPackages] = useState(true);
+  const [loadingMorePackages, setLoadingMorePackages] = useState(false);
+  const packagesPageRef = useRef(1);
+  const hasMorePackagesRef = useRef(true);
+  const loadingMorePackagesRef = useRef(false);
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
@@ -159,11 +178,25 @@ export function PorteriaLogScreen() {
 
   const selectedAptId = apartments[selectedAptIdx]?.apartmentId;
 
-  function fetchPackages() {
-    getMyPackages()
-      .then(setPackages)
+  function fetchPackages(nextPage = 1) {
+    if (nextPage === 1) setLoadingPackages(true);
+    else {
+      loadingMorePackagesRef.current = true;
+      setLoadingMorePackages(true);
+    }
+
+    getMyPackagesPage(nextPage, PAGE_SIZE)
+      .then((response) => {
+        setPackages((current) => (nextPage === 1 ? response.data : [...current, ...response.data]));
+        packagesPageRef.current = response.meta.page;
+        hasMorePackagesRef.current = response.meta.page < response.meta.totalPages;
+      })
       .catch(() => {})
-      .finally(() => setLoadingPackages(false));
+      .finally(() => {
+        setLoadingPackages(false);
+        loadingMorePackagesRef.current = false;
+        setLoadingMorePackages(false);
+      });
   }
 
   function fetchPorters() {
@@ -201,7 +234,13 @@ export function PorteriaLogScreen() {
   function handleRefresh() {
     setRefreshing(true);
     const fetches = [
-      getMyPackages().then(setPackages).catch(() => {}),
+      getMyPackagesPage(1, PAGE_SIZE)
+        .then((response) => {
+          setPackages(response.data);
+          packagesPageRef.current = response.meta.page;
+          hasMorePackagesRef.current = response.meta.page < response.meta.totalPages;
+        })
+        .catch(() => {}),
       callService.refreshPorters()
         .then((nextPorters) => {
           setPorters(nextPorters);
@@ -239,6 +278,11 @@ export function PorteriaLogScreen() {
   const pendingPackages = packages.filter((p) => !p.delivered);
   const callBusy = callState.phase !== 'idle';
 
+  function loadMorePackages() {
+    if (activeTab !== 'packages' || loadingPackages || loadingMorePackagesRef.current || refreshing || !hasMorePackagesRef.current) return;
+    fetchPackages(packagesPageRef.current + 1);
+  }
+
   async function handleCallPorter(porter: PorterAvailability) {
     try {
       await callService.callPorter(porter.id);
@@ -265,7 +309,7 @@ export function PorteriaLogScreen() {
   const unreadNotifications = notifications.filter((n) => !n.isRead).length;
 
   return (
-    <NoirScreen onRefresh={handleRefresh} refreshing={refreshing}>
+    <NoirScreen onRefresh={handleRefresh} onEndReached={loadMorePackages} refreshing={refreshing}>
       <NoirTopBar />
 
       <PackagePhotosModal pkg={selectedPkg} onClose={() => setSelectedPkg(null)} />
@@ -398,6 +442,8 @@ export function PorteriaLogScreen() {
               })
             )}
 
+            {loadingMorePackages ? <ActivityIndicator color={noirTheme.primary} /> : null}
+
             {pendingPackages.length > 0 ? (
               <View style={styles.whiteCard}>
                 <Eyebrow style={styles.whiteEyebrow}>Notificaciones</Eyebrow>
@@ -452,6 +498,7 @@ export function PorteriaLogScreen() {
                 const visitorPhotoUri = resolveImageUrl(entry.visitorPhotoPath);
                 const vehicleDetails = vehicleSummary(entry);
 
+                const entryDate = new Date(entry.entryTime);
                 return (
                   <View key={entry.id} style={styles.visitorRow}>
                     <View style={styles.visitorIdentity}>
@@ -466,24 +513,18 @@ export function PorteriaLogScreen() {
                           />
                         )}
                       </View>
-                      <View>
-                        <Text style={styles.visitorName}>{visitorName}</Text>
+                      <View style={styles.visitorInfo}>
+                        <Text style={styles.visitorName} numberOfLines={2}>{visitorName}</Text>
                         <Text style={styles.visitorRole}>{entryTypeLabel(entry.entryType)}</Text>
-                        {vehicleDetails ? <Text style={styles.visitorVehicleMeta}>{vehicleDetails}</Text> : null}
+                        {vehicleDetails ? <Text style={styles.visitorVehicleMeta} numberOfLines={2}>{vehicleDetails}</Text> : null}
                       </View>
                     </View>
                     <View style={styles.visitorTimeWrap}>
                       <Text style={styles.visitorTime}>
-                        {new Date(entry.entryTime).toLocaleTimeString('es-CO', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {entryDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
                       </Text>
                       <Text style={styles.visitorDay}>
-                        {new Date(entry.entryTime).toLocaleDateString('es-CO', {
-                          day: 'numeric',
-                          month: 'short',
-                        })}
+                        {entryDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
                       </Text>
                     </View>
                   </View>
@@ -602,6 +643,16 @@ const modalStyles = StyleSheet.create({
   photoGrid: {
     padding: 16,
     gap: 12,
+  },
+  deliveryPhotoWrap: {
+    gap: 8,
+  },
+  deliveryLabel: {
+    color: noirTheme.secondary,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
   },
   photo: {
     width: '100%',
@@ -891,26 +942,26 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   visitorRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    alignItems: 'center',
-    padding: 18,
+    padding: 16,
+    gap: 10,
     backgroundColor: noirTheme.surfaceLow,
   },
   visitorIdentity: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 14,
+  },
+  visitorInfo: {
     flex: 1,
   },
   visitorAvatarPlaceholder: {
-    width: 64,
-    height: 64,
+    width: 56,
+    height: 56,
     backgroundColor: noirTheme.surfaceHigh,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    flexShrink: 0,
   },
   visitorAvatarImage: {
     width: '100%',
@@ -918,7 +969,7 @@ const styles = StyleSheet.create({
   },
   visitorName: {
     color: noirTheme.primary,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
   },
   visitorRole: {
@@ -929,18 +980,21 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   visitorVehicleMeta: {
-    marginTop: 4,
+    marginTop: 2,
     color: noirTheme.secondary,
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 11,
+    lineHeight: 15,
   },
   visitorTimeWrap: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'baseline',
+    gap: 6,
   },
   visitorTime: {
-    color: noirTheme.primary,
-    fontSize: 24,
-    fontWeight: '900',
+    color: noirTheme.secondary,
+    fontSize: 13,
+    fontWeight: '700',
   },
   visitorDay: {
     color: noirTheme.secondary,

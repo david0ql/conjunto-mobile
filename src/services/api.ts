@@ -33,6 +33,28 @@ export interface AuthResponse {
   user: SessionUser;
 }
 
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: PaginationMeta;
+}
+
+function unwrapList<T>(response: T[] | PaginatedResponse<T>): T[] {
+  return Array.isArray(response) ? response : response.data;
+}
+
+const DEFAULT_PAGE_SIZE = 15;
+
+function pageQuery(page = 1, limit = DEFAULT_PAGE_SIZE) {
+  return `?page=${page}&limit=${limit}`;
+}
+
 export interface NewsItem {
   id: string;
   title: string;
@@ -99,7 +121,50 @@ export interface PackageItem {
   arrivalTime: string;
   delivered: boolean;
   deliveredTime?: string | null;
+  deliveryPhotoPath?: string | null;
+  photoCount?: number;
   apartment?: { number: string; towerData?: { name: string } };
+}
+
+export interface Tower {
+  id: string;
+  name: string;
+  code: string;
+  apartmentsPerFloor: number;
+  floors?: number;
+}
+
+export interface ApartmentItem {
+  id: string;
+  number: string;
+  floor?: number | null;
+  towerId: string;
+  residentCount?: number;
+  towerData?: { id: string; name: string; code: string };
+}
+
+export interface PorterPackageItem {
+  id: string;
+  description?: string | null;
+  arrivalTime: string;
+  delivered: boolean;
+  deliveredTime?: string | null;
+  deliveryPhotoPath?: string | null;
+  photoCount?: number;
+  apartmentId?: string | null;
+  residentId?: string | null;
+  apartment?: {
+    id: string;
+    number: string;
+    towerId?: string;
+    towerData?: { id: string; name: string; code?: string } | null;
+  } | null;
+  resident?: {
+    id: string;
+    name: string;
+    lastName: string;
+  } | null;
+  deliveredByEmployee?: { id: string; name: string; lastName: string } | null;
 }
 
 export interface CommunitySpace {
@@ -253,10 +318,39 @@ export class ApiError extends Error {
   }
 }
 
+async function requestMultipart<T>(
+  method: string,
+  path: string,
+  formData: FormData,
+  requireAuth = true,
+): Promise<T> {
+  const headers: Record<string, string> = {};
+  // Do NOT set Content-Type — fetch sets it automatically with the multipart boundary
+  if (requireAuth) {
+    const token = authStore.getToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE}${path}`, { method, headers, body: formData });
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      message = data.message ?? message;
+    } catch {}
+    throw new ApiError(res.status, message);
+  }
+  if (res.status === 204) return undefined as unknown as T;
+  return res.json();
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export async function loginResident(identifier: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>('POST', '/auth/login/resident', { identifier, password }, false);
+}
+
+export async function loginEmployee(username: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>('POST', '/auth/login/employee', { username, password }, false);
 }
 
 export async function getMe(): Promise<SessionUser> {
@@ -266,7 +360,11 @@ export async function getMe(): Promise<SessionUser> {
 // ─── News ─────────────────────────────────────────────────────────────────────
 
 export async function getNews(): Promise<NewsItem[]> {
-  return request<NewsItem[]>('GET', '/news');
+  return unwrapList(await request<NewsItem[] | PaginatedResponse<NewsItem>>('GET', '/news'));
+}
+
+export async function getNewsPage(page = 1, limit = DEFAULT_PAGE_SIZE): Promise<PaginatedResponse<NewsItem>> {
+  return request<PaginatedResponse<NewsItem>>('GET', `/news${pageQuery(page, limit)}`);
 }
 
 export async function getNewsItem(id: string): Promise<NewsItem> {
@@ -276,7 +374,11 @@ export async function getNewsItem(id: string): Promise<NewsItem> {
 // ─── Common Areas & Reservations ─────────────────────────────────────────────
 
 export async function getCommonAreas(): Promise<CommonArea[]> {
-  return request<CommonArea[]>('GET', '/common-areas');
+  return unwrapList(await request<CommonArea[] | PaginatedResponse<CommonArea>>('GET', '/common-areas'));
+}
+
+export async function getCommonAreasPage(page = 1, limit = DEFAULT_PAGE_SIZE): Promise<PaginatedResponse<CommonArea>> {
+  return request<PaginatedResponse<CommonArea>>('GET', `/common-areas${pageQuery(page, limit)}`);
 }
 
 export async function getReservationStatuses(): Promise<ReservationStatus[]> {
@@ -317,7 +419,11 @@ export interface PackagePhoto {
 }
 
 export async function getMyPackages(): Promise<PackageItem[]> {
-  return request<PackageItem[]>('GET', '/packages/my');
+  return unwrapList(await request<PackageItem[] | PaginatedResponse<PackageItem>>('GET', '/packages/my'));
+}
+
+export async function getMyPackagesPage(page = 1, limit = DEFAULT_PAGE_SIZE): Promise<PaginatedResponse<PackageItem>> {
+  return request<PaginatedResponse<PackageItem>>('GET', `/packages/my${pageQuery(page, limit)}`);
 }
 
 export async function getPackagePhotos(packageId: string): Promise<PackagePhoto[]> {
@@ -407,6 +513,60 @@ export async function getMyToken(assemblyId: string): Promise<AssemblyTokenRespo
 
 export async function syncVotes(assemblyId: string, votes: SyncVoteInput[]): Promise<SyncVoteResult[]> {
   return request<SyncVoteResult[]>('POST', `/assemblies/${assemblyId}/sync-votes`, { votes });
+}
+
+// ─── Porter: towers & apartments ─────────────────────────────────────────────
+
+export async function getTowers(): Promise<Tower[]> {
+  return request<Tower[]>('GET', '/towers');
+}
+
+export async function getApartmentsByTower(
+  towerId: string,
+  limit = 300,
+): Promise<PaginatedResponse<ApartmentItem>> {
+  return request<PaginatedResponse<ApartmentItem>>(
+    'GET',
+    `/apartments?towerId=${towerId}&limit=${limit}`,
+  );
+}
+
+// ─── Porter: packages ─────────────────────────────────────────────────────────
+
+function buildQs(params: Record<string, string | number | boolean | undefined>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') parts.push(`${k}=${encodeURIComponent(String(v))}`);
+  }
+  return parts.length ? `?${parts.join('&')}` : '';
+}
+
+export async function getPorterPackages(params: {
+  page?: number;
+  limit?: number;
+  delivered?: boolean;
+  towerId?: string;
+  apartmentId?: string;
+  search?: string;
+}): Promise<PaginatedResponse<PorterPackageItem>> {
+  return request<PaginatedResponse<PorterPackageItem>>(
+    'GET',
+    `/packages${buildQs({ page: params.page ?? 1, limit: params.limit ?? 20, ...(params.delivered !== undefined ? { delivered: params.delivered } : {}), ...(params.towerId ? { towerId: params.towerId } : {}), ...(params.apartmentId ? { apartmentId: params.apartmentId } : {}), ...(params.search ? { search: params.search } : {}) })}`,
+  );
+}
+
+export async function createPorterPackage(payload: {
+  apartmentId: string;
+  description?: string;
+}): Promise<PorterPackageItem> {
+  const fd = new FormData();
+  fd.append('apartmentId', payload.apartmentId);
+  if (payload.description?.trim()) fd.append('description', payload.description.trim());
+  return requestMultipart<PorterPackageItem>('POST', '/packages', fd);
+}
+
+export async function markPorterPackageDelivered(id: string): Promise<PorterPackageItem> {
+  return requestMultipart<PorterPackageItem>('PATCH', `/packages/${id}/deliver`, new FormData());
 }
 
 // ─── Image URL helper ─────────────────────────────────────────────────────────

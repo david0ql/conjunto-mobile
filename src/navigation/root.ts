@@ -188,6 +188,56 @@ function buildMainTabsRoot(selectedTab: (typeof MAIN_TABS)[number]) {
   };
 }
 
+function buildPorteroTabsRoot() {
+  const packagesIcon = (MaterialIcons as any).getImageSourceSync('inventory-2', 20, noirTheme.primary);
+  return {
+    root: {
+      bottomTabs: {
+        id: 'porteroMainTabs',
+        options: {
+          bottomTabs: {
+            animate: false,
+            backgroundColor: 'rgba(19,19,19,0.94)',
+            borderTopWidth: 0.5,
+            borderColor: 'rgba(255,255,255,0.08)',
+            currentTabIndex: 0,
+            drawBehind: false,
+            elevation: 0,
+            preferLargeIcons: false,
+            titleDisplayMode: 'alwaysShow',
+            translucent: false,
+          },
+        },
+        children: [
+          {
+            stack: {
+              id: 'tab.portero.packages.stack',
+              children: [stackComponent(COMPONENTS.porteroPackages)],
+              options: {
+                bottomTab: {
+                  text: 'Paquetes',
+                  icon: packagesIcon,
+                  selectedIcon: packagesIcon,
+                  fontSize: 9,
+                  selectedFontSize: 9,
+                  iconColor: noirTheme.secondary,
+                  selectedIconColor: noirTheme.primary,
+                  textColor: noirTheme.secondary,
+                  selectedTextColor: noirTheme.primary,
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+export function setPorteroRoot() {
+  return Navigation.setRoot(buildPorteroTabsRoot() as any);
+}
+
 export function setDefaultNavigationOptions() {
   Navigation.setDefaultOptions(defaultComponentOptions);
 }

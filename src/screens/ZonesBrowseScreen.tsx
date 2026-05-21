@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {
   Eyebrow,
@@ -13,13 +13,15 @@ import { COMPONENTS } from '../navigation/componentNames';
 import { NavigationComponentProps } from 'react-native-navigation';
 import { noirTheme } from '../design/theme';
 import {
-  getCommonAreas,
+  getCommonAreasPage,
   getCommunitySpaces,
   getMyReservations,
   type CommonArea,
   type CommunitySpace,
   type Reservation,
 } from '../services/api';
+
+const PAGE_SIZE = 15;
 
 const ZONE_ICONS: Record<string, string> = {
   Gimnasio: 'fitness-center',
@@ -29,6 +31,19 @@ const ZONE_ICONS: Record<string, string> = {
   Kiosko: 'local-cafe',
   'Cava privada': 'wine-bar',
 };
+
+function getZoneIcon(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes('gimnas') || lower.includes('gym') || lower.includes('fitness')) return 'fitness-center';
+  if (lower.includes('piscin') || lower.includes('pool') || lower.includes('natat')) return 'pool';
+  if (lower.includes('salón') || lower.includes('salon') || lower.includes('social') || lower.includes('event')) return 'celebration';
+  if (lower.includes('bbq') || lower.includes('parrilla') || lower.includes('grill') || lower.includes('terraza')) return 'outdoor-grill';
+  if (lower.includes('kiosk') || lower.includes('café') || lower.includes('cafe') || lower.includes('jardín')) return 'local-cafe';
+  if (lower.includes('cava') || lower.includes('vino') || lower.includes('wine')) return 'wine-bar';
+  if (lower.includes('cancha') || lower.includes('tenis') || lower.includes('squash')) return 'sports-tennis';
+  if (lower.includes('cowork') || lower.includes('reuni') || lower.includes('conferencia')) return 'meeting-room';
+  return 'meeting-room';
+}
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   pending: { bg: '#2a2a1a', text: '#ffd700' },
@@ -45,15 +60,33 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
   const [communitySpaces, setCommunitySpaces] = useState<CommunitySpace[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loadingAreas, setLoadingAreas] = useState(true);
+  const [loadingMoreAreas, setLoadingMoreAreas] = useState(false);
+  const areasPageRef = useRef(1);
+  const hasMoreAreasRef = useRef(true);
+  const loadingMoreAreasRef = useRef(false);
   const [loadingComunes, setLoadingComunes] = useState(false);
   const [loadingReservations, setLoadingReservations] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  function fetchAreas() {
-    getCommonAreas()
-      .then(setAreas)
+  function fetchAreas(nextPage = 1) {
+    if (nextPage === 1) setLoadingAreas(true);
+    else {
+      loadingMoreAreasRef.current = true;
+      setLoadingMoreAreas(true);
+    }
+
+    getCommonAreasPage(nextPage, PAGE_SIZE)
+      .then((response) => {
+        setAreas((current) => (nextPage === 1 ? response.data : [...current, ...response.data]));
+        areasPageRef.current = response.meta.page;
+        hasMoreAreasRef.current = response.meta.page < response.meta.totalPages;
+      })
       .catch(() => {})
-      .finally(() => setLoadingAreas(false));
+      .finally(() => {
+        setLoadingAreas(false);
+        loadingMoreAreasRef.current = false;
+        setLoadingMoreAreas(false);
+      });
   }
 
   function fetchComunes() {
@@ -75,7 +108,13 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
   function handleRefresh() {
     setRefreshing(true);
     const fetches: Promise<unknown>[] = [
-      getCommonAreas().then(setAreas).catch(() => {}),
+      getCommonAreasPage(1, PAGE_SIZE)
+        .then((response) => {
+          setAreas(response.data);
+          areasPageRef.current = response.meta.page;
+          hasMoreAreasRef.current = response.meta.page < response.meta.totalPages;
+        })
+        .catch(() => {}),
       getCommunitySpaces().then(setCommunitySpaces).catch(() => {}),
     ];
     if (activeTab === 'historial') fetches.push(getMyReservations().then(setReservations).catch(() => {}));
@@ -91,8 +130,13 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
   const statusColors = (statusCode?: string) =>
     STATUS_COLORS[statusCode ?? ''] ?? { bg: noirTheme.surfaceHigh, text: noirTheme.secondary };
 
+  function loadMoreAreas() {
+    if (activeTab !== 'reservables' || loadingAreas || loadingMoreAreasRef.current || refreshing || !hasMoreAreasRef.current) return;
+    fetchAreas(areasPageRef.current + 1);
+  }
+
   return (
-    <NoirScreen onRefresh={handleRefresh} refreshing={refreshing}>
+    <NoirScreen onRefresh={handleRefresh} onEndReached={loadMoreAreas} refreshing={refreshing}>
       <NoirTopBar />
 
       <View style={styles.content}>
@@ -144,7 +188,7 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
                 {areas.map((area) => (
                   <HeroCard
                     key={area.id}
-                    image=""
+                    icon={getZoneIcon(area.name)}
                     title={area.name}
                     label={area.maxCapacity ? `Capacidad: ${area.maxCapacity} personas` : 'Disponible'}
                     subtitle={area.name}
@@ -156,6 +200,7 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
                     }
                   />
                 ))}
+                {loadingMoreAreas ? <ActivityIndicator color={noirTheme.primary} /> : null}
               </View>
             )}
           </>

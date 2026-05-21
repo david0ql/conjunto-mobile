@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from 'react';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {
   ActivityIndicator,
   Pressable,
@@ -82,7 +83,7 @@ export function AssemblyVotingScreen({ componentId: _componentId }: NavigationCo
         <NoirTopBar title="Asamblea" />
         <View style={styles.waitingScreen}>
           <View style={styles.waitingHero}>
-            <Text style={styles.emoji}>🗳️</Text>
+            <MaterialIcons name="how-to-vote" size={64} color={noirTheme.secondary} style={styles.icon} />
             <Text style={styles.title}>Sin asamblea activa</Text>
             <Text style={styles.subtitle}>
               Cuando el administrador inicie una asamblea aparecerá aquí.
@@ -243,8 +244,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  emoji: {
-    fontSize: 48,
+  icon: {
     marginBottom: 16,
   },
   title: {

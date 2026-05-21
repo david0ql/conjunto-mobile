@@ -122,11 +122,6 @@ export function ProfileQrScreen() {
           )}
         </View>
 
-        <View style={styles.statusPill}>
-          <View style={styles.statusDot} />
-          <Text style={styles.statusText}>Active secure key</Text>
-        </View>
-
         <View style={styles.infoList}>
           {infoRows.map((item) => (
             <View key={item[1]} style={styles.infoRow}>
@@ -228,29 +223,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: noirTheme.surfaceHigh,
-  },
-  statusPill: {
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: noirTheme.surfaceLow,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 999,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: '#22c55e',
-  },
-  statusText: {
-    color: noirTheme.secondary,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
   },
   infoList: {
     gap: 4,

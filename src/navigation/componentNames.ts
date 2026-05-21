@@ -9,6 +9,7 @@ export const COMPONENTS = {
   createReservation: 'app.createReservation',
   profileQr: 'app.profileQr',
   assemblyVoting: 'app.assemblyVoting',
+  porteroPackages: 'app.porteroPackages',
 } as const;
 
 export type ComponentName = (typeof COMPONENTS)[keyof typeof COMPONENTS];

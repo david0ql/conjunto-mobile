@@ -1,4 +1,4 @@
-import { Alert, AppState, PermissionsAndroid, Platform } from 'react-native';
+import { Alert, AppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import notifee, {
   AndroidCategory,
   AndroidForegroundServiceType,
@@ -28,6 +28,10 @@ export interface CallNativeHandlers {
 
 const READY_CHANNEL_ID = 'intercom-ready';
 const CALL_CHANNEL_ID = 'intercom-live';
+// Separate channel for incoming-call ring alert — needs sound+vibration.
+// CALL_CHANNEL_ID was created without sound/vibration and Android channels
+// are immutable after first creation, so a new ID is required.
+const INCOMING_RING_CHANNEL_ID = 'incoming-call-ring';
 const SERVICE_NOTIFICATION_ID = 'intercom-service';
 const INCOMING_FALLBACK_NOTIFICATION_PREFIX = 'incoming-';
 const ACTION_OPEN_CALL = 'open-call';
@@ -163,7 +167,7 @@ class CallNativeManager {
       title: 'Llamada entrante de portería',
       body: this.getCallerName(session),
       android: {
-        channelId: CALL_CHANNEL_ID,
+        channelId: INCOMING_RING_CHANNEL_ID,
         smallIcon: 'ic_stat_intercom',
         category: AndroidCategory.CALL,
         color: '#d4af37',
@@ -191,13 +195,35 @@ class CallNativeManager {
   async startOutgoingCall(session: CallSessionPayload) {
     await this.ensureInitialized();
 
-    RNCallKeep.startCall(
-      session.id,
-      this.getHandle(session),
-      this.getCallerName(session),
-      'generic',
-      false,
-    );
+    // On Android, only attempt startCall if the phone account is enabled.
+    // If not, TelecomManager.placeCall() fails silently and fires endCall ~1.25s
+    // later — which our handler treats as a user cancellation.
+    let useNativeCall = true;
+    if (Platform.OS === 'android') {
+      try {
+        useNativeCall = await RNCallKeep.checkPhoneAccountEnabled();
+      } catch {
+        useNativeCall = false;
+      }
+    }
+
+    if (useNativeCall) {
+      RNCallKeep.startCall(
+        session.id,
+        this.getHandle(session),
+        this.getCallerName(session),
+        'generic',
+        false,
+      );
+      // iOS CallKit expects this immediately after startCall to mark the call as
+      // connecting; without it CallKit can fire endCall back after a short timeout.
+      if (Platform.OS === 'ios') {
+        try {
+          RNCallKeep.reportConnectingOutgoingCallWithUUID(session.id);
+        } catch {}
+      }
+    }
+
     await this.showReadyNotification('calling', session);
   }
 
@@ -389,7 +415,14 @@ class CallNativeManager {
       return;
     }
     if (this.initializePromise) {
-      await this.initializePromise;
+      try {
+        await this.initializePromise;
+      } catch {
+        // Initialization failed (e.g., no Activity in headless context).
+        // Reset so the next caller retries rather than re-throwing a stale rejection.
+        this.initializePromise = null;
+        this.initialized = false;
+      }
       return;
     }
     throw new Error('callNative.initialize must run before using native call controls');
@@ -417,6 +450,19 @@ class CallNativeManager {
       vibration: false,
       lights: false,
       sound: undefined,
+      badge: false,
+    });
+
+    // Ring channel for the incoming-call fallback notification.
+    // Needs sound + vibration so the user actually hears the call.
+    await notifee.createChannel({
+      id: INCOMING_RING_CHANNEL_ID,
+      name: 'Llamada entrante de portería',
+      importance: AndroidImportance.HIGH,
+      vibration: true,
+      vibrationPattern: [0, 400, 250, 400, 250, 400],
+      lights: true,
+      sound: 'default',
       badge: false,
     });
   }
@@ -454,9 +500,11 @@ class CallNativeManager {
       });
     });
 
-    RNCallKeep.addEventListener('showIncomingCallUi', () => {
-      this.enqueueAction({ type: 'open' });
-    });
+    if (Platform.OS === 'android') {
+      RNCallKeep.addEventListener('showIncomingCallUi', () => {
+        this.enqueueAction({ type: 'open' });
+      });
+    }
 
     RNCallKeep.addEventListener('checkReachability', () => {
       RNCallKeep.setReachable();
@@ -525,7 +573,7 @@ class CallNativeManager {
           {
             text: 'Abrir ajustes',
             onPress: () => {
-              void notifee.openNotificationSettings();
+              void Linking.openSettings();
             },
           },
         ],
@@ -750,7 +798,7 @@ class CallNativeManager {
       this.enqueueAction({ type: 'end', callId: callUUID });
       return;
     }
-    if (event.name === 'RNCallKeepShowIncomingCallUi') {
+    if (Platform.OS === 'android' && event.name === 'RNCallKeepShowIncomingCallUi') {
       this.enqueueAction({ type: 'open' });
     }
   }

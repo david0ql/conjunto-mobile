@@ -2,44 +2,57 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { Divider, Eyebrow, Headline, NoirScreen, PrimaryButton } from '../components/NoirUI';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { Divider, NoirScreen, PrimaryButton } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
 import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
-import { loginResident, ApiError } from '../services/api';
+import { loginResident, loginEmployee, ApiError } from '../services/api';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
 import { assemblyService } from '../realtime/assemblies/assemblyService';
+import { setPorteroRoot } from '../navigation/root';
+import { useStableScreenLayout } from '../hooks/useStableScreenLayout';
 
 export function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const { hasLayout, layout, onLayout } = useStableScreenLayout();
+
+  const measuredWidth = hasLayout ? layout.width : undefined;
+  const measuredHeight = hasLayout ? layout.height : undefined;
 
   async function handleLogin() {
     const id = identifier.trim();
     const pw = password.trim();
 
     if (!id || !pw) {
-      Alert.alert('Campos requeridos', 'Ingresa tu correo/documento y contraseña.');
+      Alert.alert('Campos requeridos', 'Ingresa tu usuario/correo y contraseña.');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await loginResident(id, pw);
+      const isEmail = id.includes('@');
+      const response = isEmail
+        ? await loginResident(id, pw)
+        : await loginEmployee(id, pw);
+
       await authStore.setSession(response.accessToken, response.user);
       callService.start(response.accessToken);
       assemblyService.start(response.accessToken);
-      setShellRoot(COMPONENTS.homeNews);
+
+      if (response.user.type === 'employee') {
+        setPorteroRoot();
+      } else {
+        setShellRoot(COMPONENTS.homeNews);
+      }
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {
@@ -48,7 +61,7 @@ export function LoginScreen() {
             'Tu cuenta no tiene un apartamento asignado aún. Contacta a la administración.',
           );
         } else if (error.status === 401) {
-          Alert.alert('Credenciales incorrectas', 'Verifica tu correo/documento y contraseña.');
+          Alert.alert('Credenciales incorrectas', 'Verifica tu usuario/correo y contraseña.');
         } else {
           Alert.alert('Error', error.message || 'No fue posible iniciar sesión.');
         }
@@ -62,75 +75,104 @@ export function LoginScreen() {
 
   return (
     <NoirScreen scroll={false}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.container}>
-        <View style={styles.heroCard}>
-          <Text style={styles.sideBrand}>RESERVA DE LA LOMA</Text>
-          <View style={styles.sideTextGroup}>
-            <Text style={styles.sideHeadline}>EL SILENCIO DEL LUJO.</Text>
-            <Text style={styles.sideCopy}>
-              Acceso exclusivo a la gestión residencial de vanguardia. Un
-              ecosistema diseñado para la discreción y el mando absoluto sobre
-              su entorno.
-            </Text>
-          </View>
-          <View style={styles.sideMeta}>
-            <Text style={styles.sideMetaText}>Requisitos de privacidad</Text>
-            <View style={styles.sideMetaLine} />
-            <Text style={styles.sideMetaText}>V.2.04</Text>
-          </View>
-        </View>
-
-        <View style={styles.formPanel}>
-          <View style={styles.header}>
-            <Headline style={styles.title}>Iniciar{'\n'}sesión</Headline>
-            <Divider />
-          </View>
-
-          <View style={styles.form}>
-            <View style={styles.field}>
-              <Eyebrow>Correo / Documento</Eyebrow>
-              <TextInput
-                placeholder="usuario@monolith.res"
-                placeholderTextColor={noirTheme.surfaceHighest}
-                style={styles.input}
-                value={identifier}
-                onChangeText={setIdentifier}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                autoCorrect={false}
-              />
+      <View style={styles.container}>
+        <KeyboardAwareScrollView
+          enableAutomaticScroll
+          enableOnAndroid
+          contentContainerStyle={[
+            styles.scrollContent,
+            measuredHeight ? { minHeight: measuredHeight } : null,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          onLayout={onLayout}
+          showsVerticalScrollIndicator={false}>
+          <View
+            style={[
+              styles.content,
+              measuredWidth ? { width: measuredWidth } : null,
+              measuredHeight ? { minHeight: measuredHeight } : null,
+            ]}>
+            <View
+              style={[
+                styles.heroSlot,
+                measuredHeight ? { minHeight: measuredHeight * 0.42 } : null,
+              ]}>
+              <View style={styles.heroCard}>
+                <Text style={styles.sideBrand}>RESERVA DE LA LOMA</Text>
+                <View style={styles.sideTextGroup}>
+                  <Text style={styles.sideHeadline}>EL SILENCIO DEL LUJO.</Text>
+                  <Text style={styles.sideCopy}>
+                    Acceso exclusivo a la gestión residencial de vanguardia. Un
+                    ecosistema diseñado para la discreción y el mando absoluto
+                    sobre su entorno.
+                  </Text>
+                </View>
+                <View style={styles.sideMeta}>
+                  <Text style={styles.sideMetaText}>Requisitos de privacidad</Text>
+                  <View style={styles.sideMetaLine} />
+                  <Text style={styles.sideMetaText}>V.2.04</Text>
+                </View>
+              </View>
             </View>
 
-            <View style={styles.field}>
-              <Eyebrow>Contraseña</Eyebrow>
-              <TextInput
-                placeholder="••••••••"
-                placeholderTextColor={noirTheme.surfaceHighest}
-                secureTextEntry
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                onSubmitEditing={handleLogin}
-              />
-            </View>
+            <View
+              style={[
+                styles.formSlot,
+                measuredHeight ? { minHeight: measuredHeight * 0.58 } : null,
+              ]}>
+              <View style={styles.formPanel}>
+                <View style={styles.header}>
+                  <Text style={styles.title}>Iniciar{'\n'}sesión</Text>
+                  <Divider />
+                </View>
 
-            <PrimaryButton
-              label={loading ? '' : 'Ingresar'}
-              onPress={handleLogin}
-              style={styles.loginButton}
-              textStyle={loading ? { display: 'none' } : undefined}
-            />
-            {loading ? (
-              <ActivityIndicator
-                color="#000"
-                style={StyleSheet.absoluteFill}
-              />
-            ) : null}
+                <View style={styles.form}>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Usuario o correo</Text>
+                    <TextInput
+                      placeholder="portero01 o correo@dominio.com"
+                      placeholderTextColor={noirTheme.surfaceHighest}
+                      style={styles.input}
+                      value={identifier}
+                      onChangeText={setIdentifier}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="next"
+                    />
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Contraseña</Text>
+                    <TextInput
+                      placeholder="••••••••"
+                      placeholderTextColor={noirTheme.surfaceHighest}
+                      secureTextEntry
+                      style={styles.input}
+                      value={password}
+                      onChangeText={setPassword}
+                      onSubmitEditing={handleLogin}
+                      returnKeyType="done"
+                    />
+                  </View>
+
+                  <PrimaryButton
+                    label={loading ? '' : 'Ingresar'}
+                    onPress={handleLogin}
+                    style={styles.loginButton}
+                    textStyle={loading ? styles.hiddenButtonLabel : undefined}
+                  />
+                  {loading ? (
+                    <ActivityIndicator
+                      color="#000"
+                      style={StyleSheet.absoluteFill}
+                    />
+                  ) : null}
+                </View>
+              </View>
+            </View>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
     </NoirScreen>
   );
 }
@@ -138,10 +180,19 @@ export function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  content: {
+    flexGrow: 1,
     paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 32,
+    paddingVertical: 24,
+  },
+  heroSlot: {
     justifyContent: 'center',
+    flexShrink: 1,
+    paddingBottom: 24,
   },
   heroCard: {
     backgroundColor: noirTheme.surfaceLow,
@@ -150,7 +201,6 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     flexShrink: 1,
     gap: 28,
-    marginBottom: 24,
   },
   sideBrand: {
     color: noirTheme.primary,
@@ -198,12 +248,20 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingBottom: 12,
   },
+  formSlot: {
+    justifyContent: 'center',
+    flexShrink: 1,
+  },
   header: {
     gap: 18,
   },
   title: {
+    color: noirTheme.primary,
     fontSize: 42,
+    fontWeight: '900',
+    letterSpacing: -1,
     lineHeight: 42,
+    textTransform: 'uppercase',
   },
   form: {
     marginTop: 24,
@@ -211,6 +269,13 @@ const styles = StyleSheet.create({
   },
   field: {
     gap: 10,
+  },
+  fieldLabel: {
+    color: noirTheme.secondary,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2.4,
+    textTransform: 'uppercase',
   },
   input: {
     color: noirTheme.ink,
@@ -222,5 +287,8 @@ const styles = StyleSheet.create({
   loginButton: {
     marginTop: 8,
     minHeight: 64,
+  },
+  hiddenButtonLabel: {
+    display: 'none',
   },
 });

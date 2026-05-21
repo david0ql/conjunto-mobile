@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { NoirScreen } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
-import { setShellRoot } from '../navigation/root';
+import { setShellRoot, setPorteroRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
 import { getMe } from '../services/api';
@@ -24,7 +24,12 @@ export function SplashScreen() {
             callService.start(token);
             assemblyService.start(token);
           }
-          setShellRoot(COMPONENTS.homeNews);
+          const user = authStore.getUser();
+          if (user?.type === 'employee') {
+            setPorteroRoot();
+          } else {
+            setShellRoot(COMPONENTS.homeNews);
+          }
         } catch {
           // Token is invalid or expired — clear and go to login
           callService.stop();
