@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { Divider, NoirScreen, PrimaryButton } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
 import { setShellRoot } from '../navigation/root';
@@ -22,6 +24,7 @@ import { useStableScreenLayout } from '../hooks/useStableScreenLayout';
 export function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { hasLayout, layout, onLayout } = useStableScreenLayout();
 
@@ -143,16 +146,27 @@ export function LoginScreen() {
 
                   <View style={styles.field}>
                     <Text style={styles.fieldLabel}>Contraseña</Text>
-                    <TextInput
-                      placeholder="••••••••"
-                      placeholderTextColor={noirTheme.surfaceHighest}
-                      secureTextEntry
-                      style={styles.input}
-                      value={password}
-                      onChangeText={setPassword}
-                      onSubmitEditing={handleLogin}
-                      returnKeyType="done"
-                    />
+                    <View>
+                      <TextInput
+                        placeholder="••••••••"
+                        placeholderTextColor={noirTheme.surfaceHighest}
+                        secureTextEntry={!showPassword}
+                        style={[styles.input, { paddingRight: 40 }]}
+                        value={password}
+                        onChangeText={setPassword}
+                        onSubmitEditing={handleLogin}
+                        returnKeyType="done"
+                      />
+                      <Pressable
+                        style={styles.eyeIcon}
+                        onPress={() => setShowPassword(!showPassword)}>
+                        <MaterialIcons
+                          name={showPassword ? 'visibility-off' : 'visibility'}
+                          size={22}
+                          color={noirTheme.surfaceHighest}
+                        />
+                      </Pressable>
+                    </View>
                   </View>
 
                   <PrimaryButton
@@ -283,6 +297,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: noirTheme.outline,
     paddingVertical: 12,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 0,
+    bottom: 8,
+    padding: 4,
   },
   loginButton: {
     marginTop: 8,

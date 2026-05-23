@@ -5,6 +5,8 @@ import {
   FlatList,
   Image,
   Modal,
+  PermissionsAndroid,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -241,6 +243,23 @@ function CreatePackageModal({
 
   async function handleTakePhoto() {
     try {
+      if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: 'Permiso de Cámara',
+            message: 'La aplicación necesita acceso a la cámara para tomar fotos de los paquetes.',
+            buttonNeutral: 'Preguntar luego',
+            buttonNegative: 'Cancelar',
+            buttonPositive: 'OK',
+          },
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert('Permiso denegado', 'No se puede usar la cámara sin permisos.');
+          return;
+        }
+      }
+
       const result = await launchCamera({
         mediaType: 'photo',
         quality: 0.7,
