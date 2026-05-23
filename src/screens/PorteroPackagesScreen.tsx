@@ -158,10 +158,14 @@ function FilterTabs({
   value,
   onChange,
   pendingCount,
+  onOpenFilter,
+  hasActiveFilters,
 }: {
   value: FilterValue;
   onChange: (v: FilterValue) => void;
   pendingCount: number;
+  onOpenFilter: () => void;
+  hasActiveFilters: boolean;
 }) {
   const tabs: { key: FilterValue; label: string; badge?: number }[] = [
     { key: 'pending', label: 'Pendientes', badge: pendingCount > 0 ? pendingCount : undefined },
@@ -170,23 +174,179 @@ function FilterTabs({
   ];
 
   return (
-    <View style={styles.filterRow}>
-      {tabs.map((tab) => (
-        <TouchableOpacity
-          key={tab.key}
-          style={[styles.filterTab, value === tab.key && styles.filterTabActive]}
-          onPress={() => onChange(tab.key)}>
-          <Text style={[styles.filterTabText, value === tab.key && styles.filterTabTextActive]}>
-            {tab.label}
-          </Text>
-          {tab.badge !== undefined && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{tab.badge > 99 ? '99+' : tab.badge}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      ))}
+    <View style={[styles.filterRow, { justifyContent: 'space-between', alignItems: 'center' }]}>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {tabs.map((tab) => (
+          <TouchableOpacity
+            key={tab.key}
+            style={[styles.filterTab, value === tab.key && styles.filterTabActive]}
+            onPress={() => onChange(tab.key)}>
+            <Text style={[styles.filterTabText, value === tab.key && styles.filterTabTextActive]}>
+              {tab.label}
+            </Text>
+            {tab.badge !== undefined && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{tab.badge > 99 ? '99+' : tab.badge}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
+      </View>
+      <TouchableOpacity onPress={onOpenFilter} style={{ position: 'relative', padding: 4 }}>
+        <MaterialIcons name="filter-list" size={24} color={hasActiveFilters ? noirTheme.primary : noirTheme.secondary} />
+        {hasActiveFilters && (
+          <View style={{ position: 'absolute', top: 2, right: 2, width: 8, height: 8, borderRadius: 4, backgroundColor: noirTheme.primary }} />
+        )}
+      </TouchableOpacity>
     </View>
+  );
+}
+
+// ─── Filter Packages Modal ─────────────────────────────────────────────────────
+
+function FilterPackagesModal({
+  visible,
+  onClose,
+  onApply,
+  onClear,
+  initialTowerId,
+  initialApartmentId,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onApply: (towerId: string, apartmentId: string | undefined) => void;
+  onClear: () => void;
+  initialTowerId?: string;
+  initialApartmentId?: string;
+}) {
+  const [towers, setTowers] = useState<Tower[]>([]);
+  const [selectedTower, setSelectedTower] = useState<Tower | null>(null);
+  const [apartments, setApartments] = useState<ApartmentItem[]>([]);
+  const [selectedApt, setSelectedApt] = useState<ApartmentItem | null>(null);
+  const [loadingTowers, setLoadingTowers] = useState(false);
+  const [loadingApts, setLoadingApts] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setLoadingTowers(true);
+    getTowers()
+      .then((res) => {
+        setTowers(res);
+        if (initialTowerId) {
+          const t = res.find((x) => x.id === initialTowerId);
+          if (t) handleSelectTower(t, initialApartmentId);
+        } else {
+          setSelectedTower(null);
+          setSelectedApt(null);
+          setApartments([]);
+        }
+      })
+      .catch(() => Alert.alert('Error', 'No fue posible cargar las torres.'))
+      .finally(() => setLoadingTowers(false));
+  }, [visible, initialTowerId, initialApartmentId]);
+
+  function handleSelectTower(tower: Tower, preselectAptId?: string) {
+    setSelectedTower(tower);
+    setSelectedApt(null);
+    setApartments([]);
+    setLoadingApts(true);
+    getApartmentsByTower(tower.id)
+      .then((res) => {
+        setApartments(res.data);
+        if (preselectAptId) {
+          const a = res.data.find((x) => x.id === preselectAptId);
+          if (a) setSelectedApt(a);
+        }
+      })
+      .catch(() => Alert.alert('Error', 'No fue posible cargar los apartamentos.'))
+      .finally(() => setLoadingApts(false));
+  }
+
+  function handleApply() {
+    if (selectedTower) {
+      onApply(selectedTower.id, selectedApt?.id);
+    }
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Filtrar paquetes</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <MaterialIcons name="close" size={22} color={noirTheme.secondary} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+            <Text style={styles.modalSectionLabel}>Torre</Text>
+            {loadingTowers ? (
+              <ActivityIndicator color={noirTheme.primary} style={{ marginVertical: 12 }} />
+            ) : (
+              <View style={styles.towerGrid}>
+                {towers.map((t) => (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[styles.towerChip, selectedTower?.id === t.id && styles.towerChipActive]}
+                    onPress={() => handleSelectTower(t)}>
+                    <Text style={[styles.towerChipText, selectedTower?.id === t.id && styles.towerChipTextActive]}>
+                      {t.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {selectedTower && (
+              <>
+                <Text style={[styles.modalSectionLabel, { marginTop: 20 }]}>
+                  Apartamento <Text style={{ fontSize: 12, color: noirTheme.secondary, fontWeight: '400', textTransform: 'none' }}>(opcional)</Text>
+                </Text>
+                {loadingApts ? (
+                  <ActivityIndicator color={noirTheme.primary} style={{ marginVertical: 12 }} />
+                ) : (
+                  <View style={styles.aptGrid}>
+                    {apartments.map((a) => (
+                      <TouchableOpacity
+                        key={a.id}
+                        style={[styles.aptCell, selectedApt?.id === a.id && styles.aptCellActive]}
+                        onPress={() => setSelectedApt(a === selectedApt ? null : a)}>
+                        <Text style={[styles.aptCellText, selectedApt?.id === a.id && styles.aptCellTextActive]}>
+                          {a.number}
+                        </Text>
+                        {a.floor && (
+                          <Text style={[styles.aptCellFloor, selectedApt?.id === a.id && styles.aptCellFloorActive]}>
+                            Piso {a.floor}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+
+            <View style={{ height: 24 }} />
+            <TouchableOpacity
+              style={[styles.submitBtn, !selectedTower && styles.submitBtnDisabled]}
+              onPress={handleApply}
+              disabled={!selectedTower}>
+              <Text style={styles.submitBtnText}>Aplicar filtro</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.submitBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: noirTheme.outline, marginTop: 12 }]}
+              onPress={onClear}>
+              <Text style={[styles.submitBtnText, { color: noirTheme.primary }]}>Limpiar filtros</Text>
+            </TouchableOpacity>
+
+            <View style={{ height: 32 }} />
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -695,12 +855,17 @@ export function PorteroPackagesScreen({ componentId: _componentId }: NavigationC
   const [showCreate, setShowCreate] = useState(false);
   const [deliverTarget, setDeliverTarget] = useState<PorterPackageItem | null>(null);
   const [photosTarget, setPhotosTarget] = useState<PorterPackageItem | null>(null);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filterTowerId, setFilterTowerId] = useState<string | undefined>();
+  const [filterApartmentId, setFilterApartmentId] = useState<string | undefined>();
 
   function buildParams(page: number) {
     return {
       page,
       limit: PAGE_SIZE,
       ...(filter === 'pending' ? { delivered: false } : filter === 'delivered' ? { delivered: true } : {}),
+      ...(filterTowerId ? { towerId: filterTowerId } : {}),
+      ...(filterApartmentId ? { apartmentId: filterApartmentId } : {}),
     };
   }
 
@@ -730,7 +895,7 @@ export function PorteroPackagesScreen({ componentId: _componentId }: NavigationC
         });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filter],
+    [filter, filterTowerId, filterApartmentId],
   );
 
   // Load pending count for badge (always)
@@ -745,7 +910,7 @@ export function PorteroPackagesScreen({ componentId: _componentId }: NavigationC
     pageRef.current = 1;
     hasMoreRef.current = true;
     loadPackages(1);
-  }, [loadPackages]);
+  }, [loadPackages, filterTowerId, filterApartmentId]);
 
   function handleLoadMore() {
     if (loadingMoreRef.current || !hasMoreRef.current || loading || refreshing) return;
@@ -862,6 +1027,8 @@ export function PorteroPackagesScreen({ componentId: _componentId }: NavigationC
         value={filter}
         onChange={handleFilterChange}
         pendingCount={pendingTotal}
+        onOpenFilter={() => setShowFilterModal(true)}
+        hasActiveFilters={!!filterTowerId || !!filterApartmentId}
       />
 
       {/* List */}
@@ -892,6 +1059,22 @@ export function PorteroPackagesScreen({ componentId: _componentId }: NavigationC
       </TouchableOpacity>
 
       {/* Modals */}
+      <FilterPackagesModal
+        visible={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        initialTowerId={filterTowerId}
+        initialApartmentId={filterApartmentId}
+        onApply={(tId, aId) => {
+          setFilterTowerId(tId);
+          setFilterApartmentId(aId);
+          setShowFilterModal(false);
+        }}
+        onClear={() => {
+          setFilterTowerId(undefined);
+          setFilterApartmentId(undefined);
+          setShowFilterModal(false);
+        }}
+      />
       <CreatePackageModal
         visible={showCreate}
         onClose={() => setShowCreate(false)}
@@ -1395,7 +1578,7 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   aptCellFloor: {
-    color: noirTheme.surfaceHighest,
+    color: noirTheme.secondary,
     fontSize: 9,
     marginTop: 2,
     fontWeight: '600',
