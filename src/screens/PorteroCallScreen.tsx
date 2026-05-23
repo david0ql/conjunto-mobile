@@ -25,7 +25,9 @@ import {
   type ApartmentItem,
 } from '../services/api';
 
-export function PorteroCallScreen({ componentId: _componentId }: NavigationComponentProps) {
+export function PorteroCallScreen({
+  componentId: _componentId,
+}: NavigationComponentProps) {
   const [towers, setTowers] = useState<Tower[]>([]);
   const [selectedTower, setSelectedTower] = useState<Tower | null>(null);
   const [apartments, setApartments] = useState<ApartmentItem[]>([]);
@@ -45,8 +47,10 @@ export function PorteroCallScreen({ componentId: _componentId }: NavigationCompo
     setLoadingApts(true);
     setApartments([]);
     getApartmentsByTower(tower.id)
-      .then((res) => setApartments(res.data))
-      .catch(() => Alert.alert('Error', 'No fue posible cargar los apartamentos.'))
+      .then(res => setApartments(res.data))
+      .catch(() =>
+        Alert.alert('Error', 'No fue posible cargar los apartamentos.'),
+      )
       .finally(() => setLoadingApts(false));
   }
 
@@ -76,27 +80,43 @@ export function PorteroCallScreen({ componentId: _componentId }: NavigationCompo
           <ActivityIndicator color={noirTheme.primary} />
         </View>
       ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.towerScrollContent}>
-          <View style={styles.towerRow}>
-            {towers.map((t) => (
-              <TouchableOpacity
-                key={t.id}
-                style={[styles.towerChip, selectedTower?.id === t.id && styles.towerChipActive]}
-                onPress={() => handleSelectTower(t)}>
-                <Text
+        <View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ flexGrow: 0 }}
+            contentContainerStyle={styles.towerScrollContent}
+          >
+            <View style={styles.towerRow}>
+              {towers.map(t => (
+                <TouchableOpacity
+                  key={t.id}
                   style={[
-                    styles.towerChipText,
-                    selectedTower?.id === t.id && styles.towerChipTextActive,
-                  ]}>
-                  {t.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </ScrollView>
+                    styles.towerChip,
+                    selectedTower?.id === t.id && styles.towerChipActive,
+                  ]}
+                  onPress={() => {
+                    if (selectedTower?.id === t.id) {
+                      setSelectedTower(null);
+                      setApartments([]);
+                    } else {
+                      handleSelectTower(t);
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.towerChipText,
+                      selectedTower?.id === t.id && styles.towerChipTextActive,
+                    ]}
+                  >
+                    {t.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
       )}
 
       {/* Apartment grid */}
@@ -112,16 +132,21 @@ export function PorteroCallScreen({ componentId: _componentId }: NavigationCompo
               numColumns={4}
               columnWrapperStyle={styles.aptRow}
               contentContainerStyle={styles.aptGrid}
-              keyExtractor={(item) => item.id}
+              keyExtractor={item => item.id}
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.aptCell}
-                  onPress={() => handleCallApt(item)}>
-                  <MaterialIcons name="phone-in-talk" size={16} color={noirTheme.primary} />
+                  onPress={() => handleCallApt(item)}
+                >
+                  <MaterialIcons
+                    name="phone-in-talk"
+                    size={16}
+                    color={noirTheme.primary}
+                  />
                   <Text style={styles.aptNumber}>{item.number}</Text>
                   {item.floor != null && (
-                    <Text style={styles.aptFloor}>P{item.floor}</Text>
+                    <Text style={styles.aptFloor}>Piso {item.floor}</Text>
                   )}
                 </TouchableOpacity>
               )}
@@ -226,7 +251,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   aptFloor: {
-    color: noirTheme.surfaceHighest,
+    color: noirTheme.secondary,
     fontSize: 9,
     fontWeight: '600',
   },
