@@ -251,8 +251,8 @@ class CallService {
     });
   }
 
-  stop() {
-    void this.unregisterPushTokens().catch(() => undefined);
+  async stop() {
+    await this.unregisterPushTokens().catch(() => undefined);
     this.disconnectRealtime();
     this.activeToken = null;
     this.teardownRtc();
@@ -1005,6 +1005,12 @@ class CallService {
   ) {
     if (parsed.event === 'incoming') {
       if (!parsed.session) {
+        return;
+      }
+      const canHandleCall = await this.canHandleIncomingSession(parsed.session);
+      if (!canHandleCall) {
+        await this.clearPendingIncomingCall(parsed.callId ?? parsed.session.id);
+        await callNative.endCall(parsed.session.id, CALL_END_REASONS.FAILED);
         return;
       }
       if (source === 'fcm' && Platform.OS === 'ios') {
@@ -1851,6 +1857,12 @@ class CallService {
       if (!pending) {
         return;
       }
+      const canHandleCall = await this.canHandleIncomingSession(pending.session);
+      if (!canHandleCall) {
+        await this.clearPendingIncomingCall(pending.session.id);
+        await callNative.endCall(pending.session.id, CALL_END_REASONS.FAILED);
+        return;
+      }
 
       callStore.setState({
         session: pending.session,
@@ -1905,6 +1917,28 @@ class CallService {
     if (!callId || pending?.session.id === callId) {
       await AsyncStorage.removeItem(PENDING_CALL_KEY);
     }
+  }
+
+  private async canHandleIncomingSession(session: CallSessionPayload) {
+    if (!authStore.isInitialized()) {
+      await authStore.init();
+    }
+
+    const token = authStore.getToken();
+    const user = authStore.getUser();
+    if (!token || !user) {
+      return false;
+    }
+
+    if (session.direction === 'outbound') {
+      return user.type === 'resident' && session.targetResidentIds.includes(user.id);
+    }
+
+    if (session.direction === 'inbound' || session.direction === 'internal') {
+      return user.type === 'employee' && session.targetEmployeeIds.includes(user.id);
+    }
+
+    return false;
   }
 
   private async getDeviceId() {

@@ -52,7 +52,7 @@ export function ProfileQrScreen() {
   }, [apartments, selectedAptIdx]);
 
   async function handleLogout() {
-    callService.stop();
+    await callService.stop();
     await authStore.clearSession();
     setShellRoot(COMPONENTS.login);
   }

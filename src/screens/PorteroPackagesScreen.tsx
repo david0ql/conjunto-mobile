@@ -955,7 +955,7 @@ export function PorteroPackagesScreen({ componentId: _componentId }: NavigationC
         text: 'Salir',
         style: 'destructive',
         onPress: async () => {
-          callService.stop();
+          await callService.stop();
           assemblyService.stop();
           await authStore.clearSession();
           setShellRoot(COMPONENTS.login);

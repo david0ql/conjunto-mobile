@@ -32,14 +32,14 @@ export function SplashScreen() {
           }
         } catch {
           // Token is invalid or expired — clear and go to login
-          callService.stop();
+          await callService.stop();
           assemblyService.stop();
           await authStore.clearSession();
           setShellRoot(COMPONENTS.login);
         }
       } else {
         // No token stored — go to login after a short branded delay
-        callService.stop();
+        void callService.stop();
         assemblyService.stop();
         setTimeout(() => setShellRoot(COMPONENTS.login), 1400);
       }
