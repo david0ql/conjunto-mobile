@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { NoirScreen } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
-import { setShellRoot, setPorteroRoot } from '../navigation/root';
+import { setPoolRoot, setPorteroRoot, setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
 import { getMe } from '../services/api';
@@ -12,6 +12,8 @@ import { assemblyService } from '../realtime/assemblies/assemblyService';
 
 export function SplashScreen() {
   useEffect(() => {
+    let loginTimer: ReturnType<typeof setTimeout> | undefined;
+
     async function bootstrap() {
       await authStore.init();
 
@@ -26,7 +28,11 @@ export function SplashScreen() {
           }
           const user = authStore.getUser();
           if (user?.type === 'employee') {
-            setPorteroRoot();
+            if (user.role === 'pool_attendant') {
+              setPoolRoot();
+            } else {
+              setPorteroRoot();
+            }
           } else {
             setShellRoot(COMPONENTS.homeNews);
           }
@@ -41,11 +47,17 @@ export function SplashScreen() {
         // No token stored — go to login after a short branded delay
         void callService.stop();
         assemblyService.stop();
-        setTimeout(() => setShellRoot(COMPONENTS.login), 1400);
+        loginTimer = setTimeout(() => setShellRoot(COMPONENTS.login), 1400);
       }
     }
 
     bootstrap();
+
+    return () => {
+      if (loginTimer) {
+        clearTimeout(loginTimer);
+      }
+    };
   }, []);
 
   return (

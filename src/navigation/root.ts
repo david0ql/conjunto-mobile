@@ -278,6 +278,76 @@ export function setPorteroRoot() {
   return Navigation.setRoot(buildPorteroTabsRoot() as any);
 }
 
+function buildPoolTabsRoot() {
+  const poolIcon = (MaterialIcons as any).getImageSourceSync('pool', 20, noirTheme.primary);
+  const profileIcon = (MaterialIcons as any).getImageSourceSync('person', 20, noirTheme.primary);
+  return {
+    root: {
+      bottomTabs: {
+        id: 'poolMainTabs',
+        options: {
+          bottomTabs: {
+            animate: false,
+            backgroundColor: 'rgba(19,19,19,0.94)',
+            borderTopWidth: 0.5,
+            borderColor: 'rgba(255,255,255,0.08)',
+            currentTabIndex: 0,
+            drawBehind: false,
+            elevation: 0,
+            preferLargeIcons: false,
+            titleDisplayMode: 'alwaysShow',
+            translucent: false,
+          },
+        },
+        children: [
+          {
+            stack: {
+              id: 'tab.pool.control.stack',
+              children: [stackComponent(COMPONENTS.poolControl)],
+              options: {
+                bottomTab: {
+                  text: 'Piscina',
+                  icon: poolIcon,
+                  selectedIcon: poolIcon,
+                  fontSize: 9,
+                  selectedFontSize: 9,
+                  iconColor: noirTheme.secondary,
+                  selectedIconColor: noirTheme.primary,
+                  textColor: noirTheme.secondary,
+                  selectedTextColor: noirTheme.primary,
+                },
+              },
+            },
+          },
+          {
+            stack: {
+              id: 'tab.pool.profile.stack',
+              children: [stackComponent(COMPONENTS.employeeProfile)],
+              options: {
+                bottomTab: {
+                  text: 'Perfil',
+                  icon: profileIcon,
+                  selectedIcon: profileIcon,
+                  fontSize: 9,
+                  selectedFontSize: 9,
+                  iconColor: noirTheme.secondary,
+                  selectedIconColor: noirTheme.primary,
+                  textColor: noirTheme.secondary,
+                  selectedTextColor: noirTheme.primary,
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+export function setPoolRoot() {
+  return Navigation.setRoot(buildPoolTabsRoot() as any);
+}
+
 export function setDefaultNavigationOptions() {
   Navigation.setDefaultOptions(defaultComponentOptions);
 }

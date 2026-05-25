@@ -12,13 +12,12 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { Divider, NoirScreen, PrimaryButton } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
-import { setShellRoot } from '../navigation/root';
+import { setPoolRoot, setPorteroRoot, setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { loginResident, loginEmployee, ApiError } from '../services/api';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
 import { assemblyService } from '../realtime/assemblies/assemblyService';
-import { setPorteroRoot } from '../navigation/root';
 import { useStableScreenLayout } from '../hooks/useStableScreenLayout';
 
 export function LoginScreen() {
@@ -52,7 +51,11 @@ export function LoginScreen() {
       assemblyService.start(response.accessToken);
 
       if (response.user.type === 'employee') {
-        setPorteroRoot();
+        if (response.user.role === 'pool_attendant') {
+          setPoolRoot();
+        } else {
+          setPorteroRoot();
+        }
       } else {
         setShellRoot(COMPONENTS.homeNews);
       }

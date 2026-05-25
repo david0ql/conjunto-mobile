@@ -8,6 +8,8 @@ export const COMPONENTS = {
   createReservation: 'app.createReservation',
   profileQr: 'app.profileQr',
   assemblyVoting: 'app.assemblyVoting',
+  poolControl: 'app.poolControl',
+  employeeProfile: 'app.employeeProfile',
   porteroPackages: 'app.porteroPackages',
   porteroLines: 'app.porteroLines',
   porteroCall: 'app.porteroCall',

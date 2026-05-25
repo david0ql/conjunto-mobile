@@ -143,6 +143,43 @@ export interface ApartmentItem {
   towerData?: { id: string; name: string; code: string };
 }
 
+export interface PoolResident {
+  id: string;
+  name: string;
+  lastName: string;
+  document: string;
+  isActive: boolean;
+}
+
+export interface PoolResidentSearchResult {
+  apartment: ApartmentItem & { tower?: string | null };
+  residents: PoolResident[];
+}
+
+export interface Visitor {
+  id: string;
+  name: string;
+  lastName: string;
+  document?: string | null;
+  phone?: string | null;
+}
+
+export interface VisitorSearchResult {
+  visitor: Visitor | null;
+  lastAccess: unknown | null;
+}
+
+export interface PoolEntry {
+  id: string;
+  apartmentId: string;
+  guestCount: number;
+  entryTime: string;
+  notes?: string | null;
+  apartment?: ApartmentItem & { tower?: string | null };
+  residentLinks?: Array<{ id: string; residentId: string; resident?: PoolResident | null }>;
+  guests?: Array<{ id: string; name: string; visitorId?: string | null; visitor?: Visitor | null }>;
+}
+
 export interface PorterPackageItem {
   id: string;
   description?: string | null;
@@ -536,6 +573,29 @@ export async function getApartmentsByTower(
     'GET',
     `/apartments?towerId=${towerId}&limit=${limit}`,
   );
+}
+
+// ─── Pool attendant ──────────────────────────────────────────────────────────
+
+export async function getPoolEntries(page = 1, limit = 15): Promise<PaginatedResponse<PoolEntry>> {
+  return request<PaginatedResponse<PoolEntry>>('GET', `/pool-entries${pageQuery(page, limit)}`);
+}
+
+export async function searchPoolResidents(apartmentId: string): Promise<PoolResidentSearchResult> {
+  return request<PoolResidentSearchResult>('GET', `/pool-entries/resident-search?apartmentId=${encodeURIComponent(apartmentId)}`);
+}
+
+export async function searchVisitorByDocument(document: string): Promise<VisitorSearchResult> {
+  return request<VisitorSearchResult>('GET', `/visitors/search?document=${encodeURIComponent(document)}`);
+}
+
+export async function createPoolEntry(payload: {
+  apartmentId: string;
+  residentIds: string[];
+  guestDocuments?: string[];
+  notes?: string;
+}): Promise<PoolEntry> {
+  return request<PoolEntry>('POST', '/pool-entries', payload);
 }
 
 // ─── Porter: packages ─────────────────────────────────────────────────────────
