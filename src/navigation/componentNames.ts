@@ -4,7 +4,6 @@ export const COMPONENTS = {
   homeNews: 'app.homeNews',
   newsDetail: 'app.newsDetail',
   zonesBrowse: 'app.zonesBrowse',
-  zoneDetail: 'app.zoneDetail',
   porteriaLog: 'app.porteriaLog',
   createReservation: 'app.createReservation',
   profileQr: 'app.profileQr',

@@ -54,6 +54,17 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 
 type SpacesTab = 'reservables' | 'comunes' | 'historial';
 
+const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+function formatTime(value?: string | null) {
+  if (!value) return '—';
+  return value.slice(0, 5);
+}
+
+function getOrderedSchedules(space: CommunitySpace) {
+  return [...(space.schedules ?? [])].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+}
+
 export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
   const [activeTab, setActiveTab] = useState<SpacesTab>('reservables');
   const [areas, setAreas] = useState<CommonArea[]>([]);
@@ -195,9 +206,6 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
                     onPrimaryPress={() =>
                       pushScreen(componentId, COMPONENTS.createReservation, { areaId: area.id, areaName: area.name }, true)
                     }
-                    onSecondaryPress={() =>
-                      pushScreen(componentId, COMPONENTS.zoneDetail)
-                    }
                   />
                 ))}
                 {loadingMoreAreas ? <ActivityIndicator color={noirTheme.primary} /> : null}
@@ -230,6 +238,41 @@ export function ZonesBrowseScreen({ componentId }: NavigationComponentProps) {
                     {space.description ? (
                       <Text style={styles.commonBody}>{space.description}</Text>
                     ) : null}
+                    <View style={styles.scheduleBlock}>
+                      <View style={styles.scheduleHeader}>
+                        <MaterialIcons color={noirTheme.secondary} name="schedule" size={16} />
+                        <Text style={styles.scheduleTitle}>Horarios</Text>
+                      </View>
+                      {getOrderedSchedules(space).length > 0 ? (
+                        <View style={styles.scheduleGrid}>
+                          {getOrderedSchedules(space).map((schedule) => (
+                            <View
+                              key={schedule.id}
+                              style={[
+                                styles.scheduleRow,
+                                !schedule.isOpen && styles.scheduleRowClosed,
+                              ]}
+                            >
+                              <Text style={styles.scheduleDay}>
+                                {DAY_LABELS[schedule.dayOfWeek] ?? `Día ${schedule.dayOfWeek + 1}`}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.scheduleTime,
+                                  !schedule.isOpen && styles.scheduleTimeClosed,
+                                ]}
+                              >
+                                {schedule.isOpen
+                                  ? `${formatTime(schedule.startTime)} - ${formatTime(schedule.endTime)}`
+                                  : 'Cerrado'}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : (
+                        <Text style={styles.scheduleEmpty}>Sin horario configurado.</Text>
+                      )}
+                    </View>
                   </View>
                 </View>
               ))
@@ -404,6 +447,63 @@ const styles = StyleSheet.create({
     color: noirTheme.ink,
     fontSize: 14,
     lineHeight: 22,
+  },
+  scheduleBlock: {
+    marginTop: 4,
+    gap: 10,
+    backgroundColor: noirTheme.surfaceHigh,
+    padding: 14,
+  },
+  scheduleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  scheduleTitle: {
+    color: noirTheme.secondary,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  scheduleGrid: {
+    gap: 8,
+  },
+  scheduleRow: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  scheduleRowClosed: {
+    opacity: 0.62,
+  },
+  scheduleDay: {
+    width: 34,
+    color: noirTheme.primary,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  scheduleTime: {
+    flex: 1,
+    color: noirTheme.ink,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  scheduleTimeClosed: {
+    color: noirTheme.secondary,
+  },
+  scheduleEmpty: {
+    color: noirTheme.secondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
   historyCard: {
     backgroundColor: noirTheme.surfaceLow,

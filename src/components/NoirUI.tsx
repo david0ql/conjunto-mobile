@@ -185,9 +185,11 @@ export function HeroCard({
         <Text style={styles.heroSubtitle}>{subtitle}</Text>
         <View style={styles.heroActions}>
           <PrimaryButton label="Reservar" onPress={onPrimaryPress} style={styles.smallButton} />
-          <Pressable onPress={onSecondaryPress} style={styles.infoPill}>
-            <MaterialIcons color={noirTheme.primary} name="info-outline" size={18} />
-          </Pressable>
+          {onSecondaryPress ? (
+            <Pressable onPress={onSecondaryPress} style={styles.infoPill}>
+              <MaterialIcons color={noirTheme.primary} name="info-outline" size={18} />
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </ImageBackground>

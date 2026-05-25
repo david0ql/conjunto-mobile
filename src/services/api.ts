@@ -174,6 +174,13 @@ export interface CommunitySpace {
   description?: string | null;
   isActive: boolean;
   createdAt: string;
+  schedules?: Array<{
+    id: string;
+    dayOfWeek: number;
+    isOpen: boolean;
+    startTime?: string | null;
+    endTime?: string | null;
+  }>;
 }
 
 export interface AccessEntry {

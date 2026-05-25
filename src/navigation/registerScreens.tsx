@@ -7,7 +7,6 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { HomeNewsScreen } from '../screens/HomeNewsScreen';
 import { NewsDetailScreen } from '../screens/NewsDetailScreen';
 import { ZonesBrowseScreen } from '../screens/ZonesBrowseScreen';
-import { ZoneDetailScreen } from '../screens/ZoneDetailScreen';
 import { PorteriaLogScreen } from '../screens/PorteriaLogScreen';
 import { CreateReservationScreen } from '../screens/CreateReservationScreen';
 import { ProfileQrScreen } from '../screens/ProfileQrScreen';
@@ -31,7 +30,6 @@ export function registerScreens() {
   Navigation.registerComponent(COMPONENTS.homeNews, () => withSafeArea(HomeNewsScreen));
   Navigation.registerComponent(COMPONENTS.newsDetail, () => withSafeArea(NewsDetailScreen));
   Navigation.registerComponent(COMPONENTS.zonesBrowse, () => withSafeArea(ZonesBrowseScreen));
-  Navigation.registerComponent(COMPONENTS.zoneDetail, () => withSafeArea(ZoneDetailScreen));
   Navigation.registerComponent(COMPONENTS.porteriaLog, () => withSafeArea(PorteriaLogScreen));
   Navigation.registerComponent(COMPONENTS.createReservation, () => withSafeArea(CreateReservationScreen));
   Navigation.registerComponent(COMPONENTS.profileQr, () => withSafeArea(ProfileQrScreen));
