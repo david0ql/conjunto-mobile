@@ -280,6 +280,7 @@ export function setPorteroRoot() {
 
 function buildPoolTabsRoot() {
   const poolIcon = (MaterialIcons as any).getImageSourceSync('pool', 20, noirTheme.primary);
+  const entriesIcon = (MaterialIcons as any).getImageSourceSync('list-alt', 20, noirTheme.primary);
   const profileIcon = (MaterialIcons as any).getImageSourceSync('person', 20, noirTheme.primary);
   return {
     root: {
@@ -306,9 +307,28 @@ function buildPoolTabsRoot() {
               children: [stackComponent(COMPONENTS.poolControl)],
               options: {
                 bottomTab: {
-                  text: 'Piscina',
+                  text: 'Registrar',
                   icon: poolIcon,
                   selectedIcon: poolIcon,
+                  fontSize: 9,
+                  selectedFontSize: 9,
+                  iconColor: noirTheme.secondary,
+                  selectedIconColor: noirTheme.primary,
+                  textColor: noirTheme.secondary,
+                  selectedTextColor: noirTheme.primary,
+                },
+              },
+            },
+          },
+          {
+            stack: {
+              id: 'tab.pool.entries.stack',
+              children: [stackComponent(COMPONENTS.poolEntries)],
+              options: {
+                bottomTab: {
+                  text: 'Ingresos',
+                  icon: entriesIcon,
+                  selectedIcon: entriesIcon,
                   fontSize: 9,
                   selectedFontSize: 9,
                   iconColor: noirTheme.secondary,

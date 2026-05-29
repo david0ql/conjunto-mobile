@@ -9,6 +9,7 @@ export const COMPONENTS = {
   profileQr: 'app.profileQr',
   assemblyVoting: 'app.assemblyVoting',
   poolControl: 'app.poolControl',
+  poolEntries: 'app.poolEntries',
   employeeProfile: 'app.employeeProfile',
   porteroPackages: 'app.porteroPackages',
   porteroLines: 'app.porteroLines',

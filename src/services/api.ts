@@ -176,6 +176,7 @@ export interface PoolEntry {
   entryTime: string;
   notes?: string | null;
   apartment?: ApartmentItem & { tower?: string | null };
+  residents?: PoolResident[];
   residentLinks?: Array<{ id: string; residentId: string; resident?: PoolResident | null }>;
   guests?: Array<{ id: string; name: string; visitorId?: string | null; visitor?: Visitor | null }>;
 }
@@ -577,8 +578,16 @@ export async function getApartmentsByTower(
 
 // ─── Pool attendant ──────────────────────────────────────────────────────────
 
-export async function getPoolEntries(page = 1, limit = 15): Promise<PaginatedResponse<PoolEntry>> {
-  return request<PaginatedResponse<PoolEntry>>('GET', `/pool-entries${pageQuery(page, limit)}`);
+export async function getPoolEntries(params: {
+  page?: number;
+  limit?: number;
+  towerId?: string;
+  apartmentId?: string;
+} = {}): Promise<PaginatedResponse<PoolEntry>> {
+  return request<PaginatedResponse<PoolEntry>>(
+    'GET',
+    `/pool-entries${buildQs({ page: params.page ?? 1, limit: params.limit ?? 15, towerId: params.towerId, apartmentId: params.apartmentId })}`,
+  );
 }
 
 export async function searchPoolResidents(apartmentId: string): Promise<PoolResidentSearchResult> {

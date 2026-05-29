@@ -1,17 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import { Eyebrow, Headline, NoirScreen, NoirTopBar, PrimaryButton } from '../components/NoirUI';
+import { NoirScreen, NoirTopBar, PrimaryButton } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
 import {
   createPoolEntry,
   getApartmentsByTower,
-  getPoolEntries,
   getTowers,
   searchPoolResidents,
   searchVisitorByDocument,
   type ApartmentItem,
-  type PoolEntry,
   type PoolResident,
   type Tower,
   type Visitor,
@@ -21,19 +19,9 @@ function fullName(person?: { name?: string; lastName?: string } | null) {
   return `${person?.name ?? ''} ${person?.lastName ?? ''}`.trim() || '—';
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString('es-CO', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 export function PoolControlScreen() {
   const [towers, setTowers] = useState<Tower[]>([]);
   const [apartments, setApartments] = useState<ApartmentItem[]>([]);
-  const [entries, setEntries] = useState<PoolEntry[]>([]);
   const [residents, setResidents] = useState<PoolResident[]>([]);
   const [selectedTowerId, setSelectedTowerId] = useState('');
   const [selectedApartmentId, setSelectedApartmentId] = useState('');
@@ -48,29 +36,19 @@ export function PoolControlScreen() {
 
   const selectedTower = towers.find((tower) => tower.id === selectedTowerId);
   const selectedApartment = apartments.find((apartment) => apartment.id === selectedApartmentId);
-  const todayCount = entries.filter((entry) => entry.entryTime.slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
-
-  const selectedResidents = useMemo(
-    () => residents.filter((resident) => selectedResidentIds.includes(resident.id)),
-    [residents, selectedResidentIds],
-  );
 
   function loadInitial() {
     setLoading(true);
-    Promise.all([
-      getTowers().then(setTowers),
-      getPoolEntries(1, 10).then((response) => setEntries(response.data)),
-    ])
+    getTowers()
+      .then(setTowers)
       .catch(() => Alert.alert('Error', 'No fue posible cargar el control de piscina.'))
       .finally(() => setLoading(false));
   }
 
   function refresh() {
     setRefreshing(true);
-    Promise.all([
-      getTowers().then(setTowers),
-      getPoolEntries(1, 10).then((response) => setEntries(response.data)),
-    ])
+    getTowers()
+      .then(setTowers)
       .catch(() => {})
       .finally(() => setRefreshing(false));
   }
@@ -146,15 +124,13 @@ export function PoolControlScreen() {
       await createPoolEntry({
         apartmentId: selectedApartmentId,
         residentIds: selectedResidentIds,
-        guestDocuments: visitors.map((visitor) => visitor.document ?? '').filter(Boolean),
+        guestDocuments: visitors.flatMap((visitor) => visitor.document ? [visitor.document] : []),
         notes: notes.trim() || undefined,
       });
       Alert.alert('Ingreso registrado', 'El ingreso a piscina fue registrado correctamente.');
       setSelectedResidentIds([]);
       setVisitors([]);
       setNotes('');
-      const response = await getPoolEntries(1, 10);
-      setEntries(response.data);
     } catch (error: any) {
       Alert.alert('No fue posible registrar', error?.message ?? 'Verifica los datos e intenta nuevamente.');
     } finally {
@@ -167,17 +143,8 @@ export function PoolControlScreen() {
       <NoirTopBar />
       <View style={styles.content}>
         <View style={styles.header}>
-          <Headline style={styles.title}>Control{'\n'}piscina</Headline>
-          <View style={styles.kpiRow}>
-            <View style={styles.kpi}>
-              <Text style={styles.kpiValue}>{entries.length}</Text>
-              <Text style={styles.kpiLabel}>Últimos</Text>
-            </View>
-            <View style={styles.kpi}>
-              <Text style={styles.kpiValue}>{todayCount}</Text>
-              <Text style={styles.kpiLabel}>Hoy</Text>
-            </View>
-          </View>
+          <Text style={styles.title}>{'Registrar\ningreso'}</Text>
+          <Text style={styles.helper}>Selecciona el apartamento, valida residentes activos y agrega visitantes por documento.</Text>
         </View>
 
         {loading ? (
@@ -185,7 +152,7 @@ export function PoolControlScreen() {
         ) : (
           <>
             <View style={styles.section}>
-              <Eyebrow>Torre</Eyebrow>
+              <Text style={styles.eyebrow}>Torre</Text>
               <View style={styles.chips}>
                 {towers.map((tower) => (
                   <Pressable
@@ -202,7 +169,7 @@ export function PoolControlScreen() {
             </View>
 
             <View style={styles.section}>
-              <Eyebrow>Apartamento</Eyebrow>
+              <Text style={styles.eyebrow}>Apartamento</Text>
               {selectedTower ? <Text style={styles.helper}>{selectedTower.name}</Text> : null}
               <View style={styles.chips}>
                 {apartments.map((apartment) => (
@@ -221,7 +188,7 @@ export function PoolControlScreen() {
 
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Eyebrow>Residentes</Eyebrow>
+                <Text style={styles.eyebrow}>Residentes</Text>
                 {selectedApartment ? <Text style={styles.helper}>Apt. {selectedApartment.number}</Text> : null}
               </View>
               {loadingResidents ? (
@@ -259,7 +226,7 @@ export function PoolControlScreen() {
             </View>
 
             <View style={styles.section}>
-              <Eyebrow>Visitantes</Eyebrow>
+              <Text style={styles.eyebrow}>Visitantes</Text>
               <View style={styles.inputRow}>
                 <TextInput
                   value={visitorDocument}
@@ -289,7 +256,7 @@ export function PoolControlScreen() {
             </View>
 
             <View style={styles.section}>
-              <Eyebrow>Notas</Eyebrow>
+              <Text style={styles.eyebrow}>Notas</Text>
               <TextInput
                 value={notes}
                 onChangeText={setNotes}
@@ -305,20 +272,6 @@ export function PoolControlScreen() {
               onPress={saving ? undefined : submitEntry}
             />
 
-            <View style={styles.section}>
-              <Eyebrow>Ingresos recientes</Eyebrow>
-              {entries.map((entry) => (
-                <View key={entry.id} style={styles.entryCard}>
-                  <View>
-                    <Text style={styles.entryTitle}>
-                      {entry.apartment?.towerData?.name ?? `Torre ${entry.apartment?.tower ?? '—'}`} · Apt. {entry.apartment?.number ?? '—'}
-                    </Text>
-                    <Text style={styles.entryMeta}>{formatDate(entry.entryTime)}</Text>
-                  </View>
-                  <Text style={styles.entryGuests}>+{entry.guestCount}</Text>
-                </View>
-              ))}
-            </View>
           </>
         )}
       </View>
@@ -336,29 +289,18 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   title: {
+    color: noirTheme.primary,
     fontSize: 48,
     lineHeight: 48,
-  },
-  kpiRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  kpi: {
-    flex: 1,
-    backgroundColor: noirTheme.surfaceLow,
-    padding: 16,
-  },
-  kpiValue: {
-    color: noirTheme.primary,
-    fontSize: 30,
     fontWeight: '900',
+    textTransform: 'uppercase',
   },
-  kpiLabel: {
+  eyebrow: {
     color: noirTheme.secondary,
     fontSize: 10,
     fontWeight: '900',
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    letterSpacing: 1.4,
   },
   section: {
     gap: 10,
@@ -512,30 +454,5 @@ const styles = StyleSheet.create({
     color: noirTheme.ink,
     fontSize: 12,
     fontWeight: '800',
-  },
-  entryCard: {
-    backgroundColor: noirTheme.surfaceLow,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  entryTitle: {
-    color: noirTheme.primary,
-    fontSize: 14,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  entryMeta: {
-    color: noirTheme.secondary,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  entryGuests: {
-    color: noirTheme.primary,
-    fontSize: 18,
-    fontWeight: '900',
   },
 });

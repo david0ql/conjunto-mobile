@@ -12,6 +12,7 @@ import { CreateReservationScreen } from '../screens/CreateReservationScreen';
 import { ProfileQrScreen } from '../screens/ProfileQrScreen';
 import { AssemblyVotingScreen } from '../screens/AssemblyVotingScreen';
 import { PoolControlScreen } from '../screens/PoolControlScreen';
+import { PoolEntriesScreen } from '../screens/PoolEntriesScreen';
 import { EmployeeProfileScreen } from '../screens/EmployeeProfileScreen';
 import { PorteroPackagesScreen } from '../screens/PorteroPackagesScreen';
 import { PorteroLinesScreen } from '../screens/PorteroLinesScreen';
@@ -37,6 +38,7 @@ export function registerScreens() {
   Navigation.registerComponent(COMPONENTS.profileQr, () => withSafeArea(ProfileQrScreen));
   Navigation.registerComponent(COMPONENTS.assemblyVoting, () => withSafeArea(AssemblyVotingScreen));
   Navigation.registerComponent(COMPONENTS.poolControl, () => withSafeArea(PoolControlScreen));
+  Navigation.registerComponent(COMPONENTS.poolEntries, () => withSafeArea(PoolEntriesScreen));
   Navigation.registerComponent(COMPONENTS.employeeProfile, () => withSafeArea(EmployeeProfileScreen));
   Navigation.registerComponent(COMPONENTS.porteroPackages, () => withSafeArea(PorteroPackagesScreen));
   Navigation.registerComponent(COMPONENTS.porteroLines, () => withSafeArea(PorteroLinesScreen));
