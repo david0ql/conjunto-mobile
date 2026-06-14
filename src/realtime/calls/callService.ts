@@ -2,11 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Event as NotifeeEvent } from '@notifee/react-native';
 import {
   AuthorizationStatus,
+  getAPNSToken,
   getMessaging,
   getToken,
   hasPermission,
+  isDeviceRegisteredForRemoteMessages,
   onMessage,
   onTokenRefresh,
+  registerDeviceForRemoteMessages,
   requestPermission,
   type FirebaseMessagingTypes,
 } from '@react-native-firebase/messaging';
@@ -1639,6 +1642,8 @@ class CallService {
       return;
     }
 
+    await this.ensureIosRemoteMessagingRegistration();
+
     try {
       const token = await getToken(firebaseMessaging);
       if (token) {
@@ -1668,6 +1673,26 @@ class CallService {
           VoipPushNotification.registerVoipToken();
         } catch {}
       }
+    }
+  }
+
+  private async ensureIosRemoteMessagingRegistration() {
+    if (Platform.OS !== 'ios') {
+      return;
+    }
+
+    try {
+      const registered = await isDeviceRegisteredForRemoteMessages(firebaseMessaging);
+      if (!registered) {
+        await registerDeviceForRemoteMessages(firebaseMessaging);
+      }
+
+      const apnsToken = await getAPNSToken(firebaseMessaging);
+      if (!apnsToken) {
+        console.warn('APNs aun no entrego token; se reintentara al registrar FCM');
+      }
+    } catch (error) {
+      console.warn('No fue posible registrar iOS para remote messages', error);
     }
   }
 
