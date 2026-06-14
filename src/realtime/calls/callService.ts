@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Event as NotifeeEvent } from '@notifee/react-native';
+import notifee, { type Event as NotifeeEvent } from '@notifee/react-native';
 import {
   AuthorizationStatus,
   getAPNSToken,
@@ -55,6 +55,13 @@ type ParsedCallPush = {
   event: 'incoming' | 'accepted' | 'ended' | 'missed' | 'rejected';
   callId: string | null;
   session: CallSessionPayload | null;
+};
+
+type GeneralNotificationPush = {
+  id: string;
+  title: string;
+  body: string;
+  notificationType: string | null;
 };
 
 const PENDING_CALL_KEY = 'intercom_pending_call';
@@ -567,11 +574,12 @@ class CallService {
 
   async handleFirebaseRemoteMessage(remoteMessage: FirebaseMessagingTypes.RemoteMessage | null | undefined) {
     const parsed = this.parseCallPush(remoteMessage?.data ?? null);
-    if (!parsed) {
+    if (parsed) {
+      await this.applyPushEvent(parsed, 'fcm');
       return;
     }
 
-    await this.applyPushEvent(parsed, 'fcm');
+    await this.handleGeneralNotificationPush(remoteMessage);
   }
 
   async handleNotifeeBackgroundEvent(event: NotifeeEvent) {
@@ -1829,6 +1837,68 @@ class CallService {
     }
 
     await this.applyPushEvent(parsed, 'voip');
+  }
+
+  private async handleGeneralNotificationPush(
+    remoteMessage: FirebaseMessagingTypes.RemoteMessage | null | undefined,
+  ) {
+    const parsed = this.parseGeneralNotificationPush(remoteMessage);
+    if (!parsed || AppState.currentState !== 'active') {
+      return;
+    }
+
+    try {
+      await notifee.displayNotification({
+        id: parsed.id,
+        title: parsed.title,
+        body: parsed.body,
+        data: {
+          kind: 'notification',
+          notificationId: parsed.id,
+          notificationType: parsed.notificationType ?? '',
+        },
+        ios: {
+          sound: 'default',
+          foregroundPresentationOptions: {
+            alert: true,
+            banner: true,
+            list: true,
+            sound: true,
+          },
+        },
+      });
+    } catch (error) {
+      console.warn('No fue posible mostrar notificacion en primer plano', error);
+    }
+  }
+
+  private parseGeneralNotificationPush(
+    remoteMessage: FirebaseMessagingTypes.RemoteMessage | null | undefined,
+  ): GeneralNotificationPush | null {
+    const data = remoteMessage?.data ?? null;
+    if (!data) {
+      return null;
+    }
+
+    const kind = this.getStringField(data, 'kind');
+    const event = this.getStringField(data, 'event');
+    if (kind !== 'notification' || event !== 'new_notification') {
+      return null;
+    }
+
+    const id = this.getStringField(data, 'notificationId') ?? remoteMessage?.messageId ?? `${Date.now()}`;
+    const title =
+      this.getStringField(data, 'title') ??
+      remoteMessage?.notification?.title ??
+      'Nueva notificacion';
+    const body = this.getStringField(data, 'body') ?? remoteMessage?.notification?.body ?? '';
+
+    return {
+      id,
+      title,
+      body,
+      notificationType: this.getStringField(data, 'notificationType'),
+    };
   }
 
   private parseCallPush(data: Record<string, unknown> | null): ParsedCallPush | null {
