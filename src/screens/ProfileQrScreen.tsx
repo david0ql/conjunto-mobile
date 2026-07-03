@@ -12,6 +12,7 @@ import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
+import { PairingNebula } from '../components/PairingNebula';
 import {
   getMyProfile,
   getMyApartments,
@@ -25,6 +26,7 @@ export function ProfileQrScreen() {
   const [apartments, setApartments] = useState<ResidentApartment[]>([]);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [selectedAptIdx, setSelectedAptIdx] = useState(0);
+  const [mode, setMode] = useState<'signature' | 'qr'>('signature');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -107,20 +109,54 @@ export function ProfileQrScreen() {
           </View>
         ) : null}
 
-        {/* QR Code */}
-        <View style={styles.qrFrame}>
-          {loading ? (
-            <View style={styles.qrPlaceholder}>
-              <ActivityIndicator color={noirTheme.surfaceHighest} size="large" />
-            </View>
-          ) : qrDataUrl ? (
-            <Image source={{ uri: qrDataUrl }} style={styles.qr} />
-          ) : (
-            <View style={styles.qrPlaceholder}>
-              <MaterialIcons color={noirTheme.surfaceHighest} name="qr-code" size={80} />
-            </View>
-          )}
+        {/* Firma viva / QR */}
+        <View style={styles.modeRow}>
+          <Pressable
+            onPress={() => setMode('signature')}
+            style={[styles.modePill, mode === 'signature' && styles.modePillActive]}>
+            <Text style={[styles.modePillText, mode === 'signature' && styles.modePillTextActive]}>
+              Firma viva
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setMode('qr')}
+            style={[styles.modePill, mode === 'qr' && styles.modePillActive]}>
+            <Text style={[styles.modePillText, mode === 'qr' && styles.modePillTextActive]}>
+              Código QR
+            </Text>
+          </Pressable>
         </View>
+
+        {mode === 'signature' ? (
+          <View style={styles.signatureBlock}>
+            <View style={styles.signatureFrame}>
+              {loading || !profile ? (
+                <View style={styles.signaturePlaceholder}>
+                  <ActivityIndicator color={noirTheme.surfaceHighest} size="large" />
+                </View>
+              ) : (
+                <PairingNebula seed={`${profile.id}|${profile.document ?? ''}`} />
+              )}
+            </View>
+            <Text style={styles.signatureCaption}>
+              FIRMA DE ACCESO EN VIVO — SE RENUEVA SOLA CADA 10 SEGUNDOS
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.qrFrame}>
+            {loading ? (
+              <View style={styles.qrPlaceholder}>
+                <ActivityIndicator color={noirTheme.surfaceHighest} size="large" />
+              </View>
+            ) : qrDataUrl ? (
+              <Image source={{ uri: qrDataUrl }} style={styles.qr} />
+            ) : (
+              <View style={styles.qrPlaceholder}>
+                <MaterialIcons color={noirTheme.surfaceHighest} name="qr-code" size={80} />
+              </View>
+            )}
+          </View>
+        )}
 
         <View style={styles.infoList}>
           {infoRows.map((item) => (
@@ -207,6 +243,55 @@ const styles = StyleSheet.create({
   },
   aptPillTextActive: {
     color: '#000000',
+  },
+  modeRow: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    gap: 8,
+  },
+  modePill: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: noirTheme.surfaceLow,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  modePillActive: {
+    backgroundColor: noirTheme.primary,
+    borderColor: noirTheme.primary,
+  },
+  modePillText: {
+    color: noirTheme.secondary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  modePillTextActive: {
+    color: '#000000',
+  },
+  signatureBlock: {
+    gap: 12,
+  },
+  signatureFrame: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: '#000104',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  signaturePlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signatureCaption: {
+    color: noirTheme.surfaceHighest,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2,
+    textAlign: 'center',
   },
   qrFrame: {
     alignSelf: 'center',
