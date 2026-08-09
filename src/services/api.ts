@@ -226,6 +226,7 @@ export interface AccessEntry {
   entryTime: string;
   exitTime?: string | null;
   entryType: 'pedestrian' | 'car' | 'motorcycle' | 'other';
+  visitorCategory?: 'visita' | 'domiciliario' | null;
   vehicleBrandId?: string | null;
   vehicleColor?: string | null;
   vehiclePlate?: string | null;

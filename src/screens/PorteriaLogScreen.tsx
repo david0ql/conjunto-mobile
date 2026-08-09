@@ -56,6 +56,12 @@ function entryTypeLabel(type: AccessEntry['entryType'] | undefined): string {
   return 'Ingreso a pie';
 }
 
+function visitorCategoryLabel(category: AccessEntry['visitorCategory']): string | null {
+  if (category === 'domiciliario') return 'Domiciliario';
+  if (category === 'visita') return 'Visita';
+  return null;
+}
+
 function vehicleSummary(entry: AccessEntry): string | null {
   const requiresVehicleData = entry.entryType === 'car' || entry.entryType === 'motorcycle';
   if (!requiresVehicleData) return null;
@@ -153,6 +159,33 @@ function PackagePhotosModal({
   );
 }
 
+// ─── Visitor photo modal ──────────────────────────────────────────────────────
+
+function VisitorPhotoModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
+  if (!uri) return null;
+
+  return (
+    <Modal
+      visible={!!uri}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}>
+      <View style={modalStyles.container}>
+        <View style={modalStyles.header}>
+          <Text style={modalStyles.title}>Foto del visitante</Text>
+          <Pressable onPress={onClose} style={modalStyles.closeBtn}>
+            <MaterialIcons color={noirTheme.primary} name="close" size={24} />
+          </Pressable>
+        </View>
+
+        <View style={modalStyles.photoPreviewWrap}>
+          <Image source={{ uri }} style={modalStyles.photoPreview} resizeMode="contain" />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export function PorteriaLogScreen() {
@@ -176,6 +209,7 @@ export function PorteriaLogScreen() {
   const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPkg, setSelectedPkg] = useState<PackageItem | null>(null);
+  const [previewPhotoUri, setPreviewPhotoUri] = useState<string | null>(null);
 
   const selectedAptId = apartments[selectedAptIdx]?.apartmentId;
 
@@ -324,6 +358,7 @@ export function PorteriaLogScreen() {
       <NoirTopBar />
 
       <PackagePhotosModal pkg={selectedPkg} onClose={() => setSelectedPkg(null)} />
+      <VisitorPhotoModal uri={previewPhotoUri} onClose={() => setPreviewPhotoUri(null)} />
 
       <View style={styles.content}>
         <View style={styles.callCard}>
@@ -508,12 +543,16 @@ export function PorteriaLogScreen() {
                     : 'Residente';
                 const visitorPhotoUri = resolveImageUrl(entry.visitorPhotoPath);
                 const vehicleDetails = vehicleSummary(entry);
+                const categoryLabel = visitorCategoryLabel(entry.visitorCategory);
 
                 const entryDate = new Date(entry.entryTime);
                 return (
                   <View key={entry.id} style={styles.visitorRow}>
                     <View style={styles.visitorIdentity}>
-                      <View style={styles.visitorAvatarPlaceholder}>
+                      <Pressable
+                        disabled={!visitorPhotoUri}
+                        onPress={() => visitorPhotoUri && setPreviewPhotoUri(visitorPhotoUri)}
+                        style={styles.visitorAvatarPlaceholder}>
                         {visitorPhotoUri ? (
                           <Image source={{ uri: visitorPhotoUri }} style={styles.visitorAvatarImage} resizeMode="cover" />
                         ) : (
@@ -523,10 +562,14 @@ export function PorteriaLogScreen() {
                             size={28}
                           />
                         )}
-                      </View>
+                      </Pressable>
                       <View style={styles.visitorInfo}>
                         <Text style={styles.visitorName} numberOfLines={2}>{visitorName}</Text>
-                        <Text style={styles.visitorRole}>{entryTypeLabel(entry.entryType)}</Text>
+                        <Text style={styles.visitorRole}>
+                          -
+                          {entryTypeLabel(entry.entryType)}
+                          {categoryLabel ? ` · ${categoryLabel}` : ' '}
+                        </Text>
                         {vehicleDetails ? <Text style={styles.visitorVehicleMeta} numberOfLines={2}>{vehicleDetails}</Text> : null}
                       </View>
                     </View>
@@ -622,6 +665,16 @@ const modalStyles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: noirTheme.background,
+  },
+  photoPreviewWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: noirTheme.background,
+  },
+  photoPreview: {
+    width: '100%',
+    height: '100%',
   },
   header: {
     flexDirection: 'row',
