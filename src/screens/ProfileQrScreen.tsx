@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { NavigationComponentProps } from 'react-native-navigation';
 import {
   Eyebrow,
   NoirScreen,
@@ -8,7 +9,7 @@ import {
   PrimaryButton,
 } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
-import { setShellRoot } from '../navigation/root';
+import { setShellRoot, pushScreen } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
@@ -17,13 +18,24 @@ import {
   getMyProfile,
   getMyApartments,
   getMyQr,
+  getMyVehicles,
   type ResidentProfile,
   type ResidentApartment,
+  type Vehicle,
 } from '../services/api';
 
-export function ProfileQrScreen() {
+const VEHICLE_TYPE_ICONS: Record<string, string> = {
+  car: 'directions-car',
+  motorcycle: 'two-wheeler',
+  truck: 'local-shipping',
+  bicycle: 'pedal-bike',
+  other: 'commute',
+};
+
+export function ProfileQrScreen({ componentId }: NavigationComponentProps) {
   const [profile, setProfile] = useState<ResidentProfile | null>(null);
   const [apartments, setApartments] = useState<ResidentApartment[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [selectedAptIdx, setSelectedAptIdx] = useState(0);
   const [mode, setMode] = useState<'signature' | 'qr'>('signature');
@@ -32,10 +44,11 @@ export function ProfileQrScreen() {
 
   function fetchProfile(isRefresh = false) {
     if (isRefresh) setRefreshing(true);
-    Promise.all([getMyProfile(), getMyApartments()])
-      .then(([p, apts]) => {
+    Promise.all([getMyProfile(), getMyApartments(), getMyVehicles().catch(() => [])])
+      .then(([p, apts, vs]) => {
         setProfile(p);
         setApartments(apts);
+        setVehicles(vs);
       })
       .catch(() => {})
       .finally(() => { setLoading(false); setRefreshing(false); });
@@ -68,10 +81,12 @@ export function ProfileQrScreen() {
 
   const infoRows = [
     ['business', 'Residencia', aptLabel],
-    ['verified-user', 'Tipo de acceso', 'RESIDENTE — ACCESO COMPLETO'],
+    ['verified-user', 'Tipo de acceso', profile?.residentType?.name?.toUpperCase() ?? 'RESIDENTE'],
     ['email', 'Correo', profile?.email ?? '—'],
     ['phone', 'Teléfono', profile?.phone ?? '—'],
   ] as const;
+
+  const canManageFamily = authStore.getUser()?.type === 'resident';
 
   return (
     <NoirScreen onRefresh={() => fetchProfile(true)} refreshing={refreshing}>
@@ -125,6 +140,13 @@ export function ProfileQrScreen() {
               Código QR
             </Text>
           </Pressable>
+          {canManageFamily ? (
+            <Pressable
+              onPress={() => pushScreen(componentId, COMPONENTS.familyList)}
+              style={styles.familyButton}>
+              <MaterialIcons color={noirTheme.primary} name="people" size={18} />
+            </Pressable>
+          ) : null}
         </View>
 
         {mode === 'signature' ? (
@@ -169,6 +191,32 @@ export function ProfileQrScreen() {
             </View>
           ))}
         </View>
+
+        {vehicles.length > 0 ? (
+          <View style={styles.vehicleSection}>
+            <Eyebrow>Vehículos</Eyebrow>
+            <View style={styles.infoList}>
+              {vehicles.map((vehicle) => {
+                const secondary = [vehicle.vehicleBrand?.name, vehicle.model, vehicle.color]
+                  .filter(Boolean)
+                  .join(' · ');
+                return (
+                  <View key={vehicle.id} style={styles.infoRow}>
+                    <View style={styles.infoLeft}>
+                      <MaterialIcons
+                        color={noirTheme.secondary}
+                        name={VEHICLE_TYPE_ICONS[vehicle.vehicleType] ?? 'commute'}
+                        size={18}
+                      />
+                      <Text style={styles.infoLabel}>{vehicle.plate?.toUpperCase()}</Text>
+                    </View>
+                    <Text style={styles.infoValue}>{secondary || '—'}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
         <PrimaryButton
           label="Cerrar sesión"
@@ -270,6 +318,15 @@ const styles = StyleSheet.create({
   modePillTextActive: {
     color: '#000000',
   },
+  familyButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: noirTheme.surfaceLow,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
   signatureBlock: {
     gap: 12,
   },
@@ -311,6 +368,9 @@ const styles = StyleSheet.create({
   },
   infoList: {
     gap: 4,
+  },
+  vehicleSection: {
+    gap: 12,
   },
   infoRow: {
     paddingVertical: 18,

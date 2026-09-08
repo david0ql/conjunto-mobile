@@ -265,6 +265,44 @@ export interface ResidentProfile {
     floor?: number | null;
     towerData?: { name: string; code: string };
   } | null;
+  residentType?: { id: string; code: string; name: string } | null;
+}
+
+export interface FamilyMember {
+  id: string;
+  name: string;
+  lastName: string;
+  document?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  photoPath?: string | null;
+  isActive: boolean;
+  residentType?: { id: string; code: string; name: string } | null;
+}
+
+export interface CreateFamilyMemberInput {
+  name: string;
+  lastName: string;
+  document: string;
+  phone?: string;
+  email?: string;
+  birthDate?: string;
+  photo: { uri: string; fileName?: string; type?: string };
+}
+
+export interface CreateFamilyMemberResult {
+  resident: FamilyMember;
+  generatedPassword: string;
+}
+
+export interface Vehicle {
+  id: string;
+  plate: string;
+  vehicleType: string;
+  color?: string | null;
+  model?: string | null;
+  notes?: string | null;
+  vehicleBrand?: { id: string; name: string } | null;
 }
 
 export interface CallsIceConfigResponse {
@@ -501,6 +539,37 @@ export async function getMyApartments(): Promise<ResidentApartment[]> {
 
 export async function getMyQr(apartmentId: string): Promise<{ dataUrl: string; residentId: string; apartmentId: string }> {
   return request<{ dataUrl: string; residentId: string; apartmentId: string }>('GET', `/residents/me/qr?apartmentId=${apartmentId}`);
+}
+
+export async function getMemberQr(apartmentId: string, residentId: string): Promise<{ dataUrl: string; residentId: string; apartmentId: string }> {
+  return request<{ dataUrl: string; residentId: string; apartmentId: string }>(
+    'GET',
+    `/residents/me/qr?apartmentId=${apartmentId}&residentId=${residentId}`,
+  );
+}
+
+export async function getMyFamily(): Promise<FamilyMember[]> {
+  return request<FamilyMember[]>('GET', '/residents/me/family');
+}
+
+export async function getMyVehicles(): Promise<Vehicle[]> {
+  return request<Vehicle[]>('GET', '/residents/me/vehicles');
+}
+
+export async function createFamilyMember(input: CreateFamilyMemberInput): Promise<CreateFamilyMemberResult> {
+  const fd = new FormData();
+  fd.append('name', input.name);
+  fd.append('lastName', input.lastName);
+  fd.append('document', input.document);
+  if (input.phone) fd.append('phone', input.phone);
+  if (input.email) fd.append('email', input.email);
+  if (input.birthDate) fd.append('birthDate', input.birthDate);
+  fd.append('photo', {
+    uri: input.photo.uri,
+    name: input.photo.fileName ?? 'photo.jpg',
+    type: input.photo.type ?? 'image/jpeg',
+  } as any);
+  return requestMultipart<CreateFamilyMemberResult>('POST', '/residents/me/family', fd);
 }
 
 export async function getCallsIceConfig(): Promise<CallsIceConfigResponse> {

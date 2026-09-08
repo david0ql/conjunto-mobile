@@ -10,6 +10,8 @@ import { ZonesBrowseScreen } from '../screens/ZonesBrowseScreen';
 import { PorteriaLogScreen } from '../screens/PorteriaLogScreen';
 import { CreateReservationScreen } from '../screens/CreateReservationScreen';
 import { ProfileQrScreen } from '../screens/ProfileQrScreen';
+import { FamilyListScreen } from '../screens/FamilyListScreen';
+import { FamilyCreateScreen } from '../screens/FamilyCreateScreen';
 import { AssemblyVotingScreen } from '../screens/AssemblyVotingScreen';
 import { PoolControlScreen } from '../screens/PoolControlScreen';
 import { PoolEntriesScreen } from '../screens/PoolEntriesScreen';
@@ -36,6 +38,8 @@ export function registerScreens() {
   Navigation.registerComponent(COMPONENTS.porteriaLog, () => withSafeArea(PorteriaLogScreen));
   Navigation.registerComponent(COMPONENTS.createReservation, () => withSafeArea(CreateReservationScreen));
   Navigation.registerComponent(COMPONENTS.profileQr, () => withSafeArea(ProfileQrScreen));
+  Navigation.registerComponent(COMPONENTS.familyList, () => withSafeArea(FamilyListScreen));
+  Navigation.registerComponent(COMPONENTS.familyCreate, () => withSafeArea(FamilyCreateScreen));
   Navigation.registerComponent(COMPONENTS.assemblyVoting, () => withSafeArea(AssemblyVotingScreen));
   Navigation.registerComponent(COMPONENTS.poolControl, () => withSafeArea(PoolControlScreen));
   Navigation.registerComponent(COMPONENTS.poolEntries, () => withSafeArea(PoolEntriesScreen));

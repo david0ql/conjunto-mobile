@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Modal, PanResponder, Pressable, StyleSheet, Text, View, Image } from 'react-native';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { NavigationComponentProps } from 'react-native-navigation';
 import { Eyebrow, Headline, NoirScreen, NoirTopBar } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
@@ -10,10 +11,136 @@ interface Props extends NavigationComponentProps {
   newsId: string;
 }
 
+const MAX_ZOOM = 4;
+
+function touchDistance(touches: Array<{ pageX: number; pageY: number }>): number {
+  const [a, b] = touches;
+  const dx = a.pageX - b.pageX;
+  const dy = a.pageY - b.pageY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// Pinch-to-zoom + pan + double-tap, built on PanResponder/Animated only —
+// no gesture/zoom library is installed in this project, and adding one
+// would require a native rebuild.
+function ZoomableImage({ uri }: { uri: string }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+
+  const scaleValue = useRef(1);
+  const translateValue = useRef({ x: 0, y: 0 });
+  const pinchStartDistance = useRef<number | null>(null);
+  const pinchStartScale = useRef(1);
+  const lastTapAt = useRef(0);
+
+  function animateTo(nextScale: number, nextX: number, nextY: number) {
+    scaleValue.current = nextScale;
+    translateValue.current = { x: nextX, y: nextY };
+    Animated.parallel([
+      Animated.spring(scale, { toValue: nextScale, useNativeDriver: false, friction: 7 }),
+      Animated.spring(translateX, { toValue: nextX, useNativeDriver: false, friction: 7 }),
+      Animated.spring(translateY, { toValue: nextY, useNativeDriver: false, friction: 7 }),
+    ]).start();
+  }
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_evt, gestureState) =>
+        Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2 || gestureState.numberActiveTouches === 2,
+      onPanResponderGrant: (evt) => {
+        if (evt.nativeEvent.touches.length === 2) {
+          pinchStartDistance.current = touchDistance(evt.nativeEvent.touches);
+          pinchStartScale.current = scaleValue.current;
+        }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const touches = evt.nativeEvent.touches;
+        if (touches.length === 2) {
+          if (pinchStartDistance.current == null) {
+            pinchStartDistance.current = touchDistance(touches);
+            pinchStartScale.current = scaleValue.current;
+            return;
+          }
+          const ratio = touchDistance(touches) / pinchStartDistance.current;
+          const nextScale = Math.min(MAX_ZOOM, Math.max(1, pinchStartScale.current * ratio));
+          scale.setValue(nextScale);
+          scaleValue.current = nextScale;
+        } else if (touches.length === 1 && scaleValue.current > 1) {
+          const nextX = translateValue.current.x + gestureState.dx;
+          const nextY = translateValue.current.y + gestureState.dy;
+          translateX.setValue(nextX);
+          translateY.setValue(nextY);
+        }
+      },
+      onPanResponderRelease: (_evt, gestureState) => {
+        const wasPinching = pinchStartDistance.current != null;
+        pinchStartDistance.current = null;
+
+        if (wasPinching) {
+          if (scaleValue.current <= 1) {
+            animateTo(1, 0, 0);
+          } else {
+            translateValue.current = { x: translateValue.current.x, y: translateValue.current.y };
+          }
+          return;
+        }
+
+        if (scaleValue.current > 1) {
+          translateValue.current = {
+            x: translateValue.current.x + gestureState.dx,
+            y: translateValue.current.y + gestureState.dy,
+          };
+          return;
+        }
+
+        const isTap = Math.abs(gestureState.dx) < 6 && Math.abs(gestureState.dy) < 6;
+        if (!isTap) return;
+
+        const now = Date.now();
+        if (now - lastTapAt.current < 280) {
+          animateTo(scaleValue.current > 1 ? 1 : 2.5, 0, 0);
+        }
+        lastTapAt.current = now;
+      },
+    }),
+  ).current;
+
+  return (
+    <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers}>
+      <Animated.Image
+        source={{ uri }}
+        style={[
+          StyleSheet.absoluteFill,
+          { transform: [{ translateX }, { translateY }, { scale }] },
+        ]}
+        resizeMode="contain"
+      />
+    </View>
+  );
+}
+
+function NewsImageModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
+  if (!uri) return null;
+
+  return (
+    <Modal visible={!!uri} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={modalStyles.overlay}>
+        <ZoomableImage uri={uri} />
+        <Pressable onPress={onClose} style={modalStyles.closeBtn} hitSlop={12}>
+          <MaterialIcons color={noirTheme.primary} name="close" size={26} />
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
 export function NewsDetailScreen({ componentId, newsId }: Props) {
   const [news, setNews] = useState<NewsItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   function fetchNews(isRefresh = false) {
     if (isRefresh) setRefreshing(true);
@@ -34,6 +161,8 @@ export function NewsDetailScreen({ componentId, newsId }: Props) {
         onLeftPress={() => popScreen(componentId)}
       />
 
+      <NewsImageModal uri={previewOpen ? imageUrl : null} onClose={() => setPreviewOpen(false)} />
+
       <View style={styles.content}>
         {loading ? (
           <View style={styles.loadingBlock}>
@@ -43,7 +172,9 @@ export function NewsDetailScreen({ componentId, newsId }: Props) {
         ) : news ? (
           <>
             {imageUrl ? (
-              <Image source={{ uri: imageUrl }} style={styles.heroImage} resizeMode="cover" />
+              <Pressable onPress={() => setPreviewOpen(true)}>
+                <Image source={{ uri: imageUrl }} style={styles.heroImage} resizeMode="cover" />
+              </Pressable>
             ) : null}
 
             <View style={styles.meta}>
@@ -139,5 +270,23 @@ const styles = StyleSheet.create({
     color: noirTheme.secondary,
     textAlign: 'center',
     marginTop: 40,
+  },
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: 56,
+    right: 20,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
 });

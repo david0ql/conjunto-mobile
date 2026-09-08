@@ -80,42 +80,33 @@ export function PorteroCallScreen({
           <ActivityIndicator color={noirTheme.primary} />
         </View>
       ) : (
-        <View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ flexGrow: 0 }}
-            contentContainerStyle={styles.towerScrollContent}
-          >
-            <View style={styles.towerRow}>
-              {towers.map(t => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[
-                    styles.towerChip,
-                    selectedTower?.id === t.id && styles.towerChipActive,
-                  ]}
-                  onPress={() => {
-                    if (selectedTower?.id === t.id) {
-                      setSelectedTower(null);
-                      setApartments([]);
-                    } else {
-                      handleSelectTower(t);
-                    }
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.towerChipText,
-                      selectedTower?.id === t.id && styles.towerChipTextActive,
-                    ]}
-                  >
-                    {t.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
+        <View style={styles.towerContainer}>
+          {towers.map(t => (
+            <TouchableOpacity
+              key={t.id}
+              style={[
+                styles.towerChip,
+                selectedTower?.id === t.id && styles.towerChipActive,
+              ]}
+              onPress={() => {
+                if (selectedTower?.id === t.id) {
+                  setSelectedTower(null);
+                  setApartments([]);
+                } else {
+                  handleSelectTower(t);
+                }
+              }}
+            >
+              <Text
+                style={[
+                  styles.towerChipText,
+                  selectedTower?.id === t.id && styles.towerChipTextActive,
+                ]}
+              >
+                {t.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
       )}
 
@@ -195,16 +186,15 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     textTransform: 'uppercase',
   },
-  towerScrollContent: {
-    borderBottomWidth: 1,
-    borderBottomColor: noirTheme.outline,
-    backgroundColor: noirTheme.surfaceLow,
-  },
-  towerRow: {
+  towerContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     paddingHorizontal: 20,
     paddingVertical: 12,
     gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: noirTheme.outline,
+    backgroundColor: noirTheme.surfaceLow,
   },
   towerChip: {
     paddingHorizontal: 16,

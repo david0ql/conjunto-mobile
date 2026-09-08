@@ -7,6 +7,8 @@ export const COMPONENTS = {
   porteriaLog: 'app.porteriaLog',
   createReservation: 'app.createReservation',
   profileQr: 'app.profileQr',
+  familyList: 'app.familyList',
+  familyCreate: 'app.familyCreate',
   assemblyVoting: 'app.assemblyVoting',
   poolControl: 'app.poolControl',
   poolEntries: 'app.poolEntries',
