@@ -1,0 +1,13 @@
+[versions]
+hms-push = "6.13.0.301"
+android-gradle-plugin = "8.12.0"
+
+[libraries]
+hms-push = { module = "com.huawei.hms:push", version.ref = "hms-push" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "android-gradle-plugin" }
+
+# The Huawei AGConnect plugin resolves the conventional `libs` catalog when
+# running on Gradle 9, even though this project declares dependencies in Groovy.
+# Keeping the catalog present avoids a configuration-time crash.

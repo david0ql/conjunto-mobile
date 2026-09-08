@@ -35,6 +35,7 @@ local.properties
 !debug.keystore
 .kotlin/
 android/keystore.properties
+android/app/agconnect-services.json
 
 # node.js
 #

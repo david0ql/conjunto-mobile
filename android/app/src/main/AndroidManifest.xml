@@ -45,6 +45,14 @@
         android:exported="false"
         tools:replace="android:foregroundServiceType" />
 
+      <service
+        android:name=".push.HuaweiPushMessageService"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
+        </intent-filter>
+      </service>
+
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

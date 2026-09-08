@@ -339,7 +339,7 @@ export interface PorterAvailability {
 export interface RegisterCallDeviceInput {
   token: string;
   platform: 'android' | 'ios';
-  channel: 'fcm' | 'voip';
+  channel: 'fcm' | 'hms' | 'voip';
   environment?: 'development' | 'production' | null;
   deviceId?: string | null;
   appVersion?: string | null;

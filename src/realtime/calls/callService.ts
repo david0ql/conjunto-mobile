@@ -38,6 +38,11 @@ import {
 } from '../../services/api';
 import { callNative, CALL_END_REASONS } from './callNative';
 import { callStore } from './callStore';
+import {
+  consumePendingHuaweiMessage,
+  getHuaweiPushToken,
+  selectAndroidPushProvider,
+} from '../../services/pushProvider';
 import type {
   CallSessionPayload,
   CallSignalEnvelope,
@@ -47,7 +52,7 @@ import type {
 
 type PendingCallRecord = {
   session: CallSessionPayload;
-  source: 'socket' | 'fcm' | 'voip';
+  source: 'socket' | 'fcm' | 'hms' | 'voip';
   persistedAt: number;
 };
 
@@ -101,7 +106,9 @@ class CallService {
   private localMediaSetupCallId: string | null = null;
   private answerProcessingCallId: string | null = null;
   private pushRegistrationPromise: Promise<void> | null = null;
+  private registeredHmsToken: string | null = null;
   private hasPromptedMessagingSettings = false;
+  private activeCallTone: 'ringtone' | 'ringback' | null = null;
 
   bootstrap() {
     if (this.bootstrapped) {
@@ -162,6 +169,7 @@ class CallService {
       void this.registerPushTokens().catch(() => undefined);
       void this.ensureBackgroundReadiness().catch(() => undefined);
       void this.consumeDeferredSystemActions();
+      void this.consumePendingHuaweiPush();
       return;
     }
 
@@ -179,6 +187,7 @@ class CallService {
         console.warn('No fue posible registrar los tokens de llamadas', error);
       });
       void this.consumeDeferredSystemActions();
+      void this.consumePendingHuaweiPush();
     });
 
     this.socket.on('disconnect', () => {
@@ -226,6 +235,8 @@ class CallService {
       if (current.session?.id) {
         this.traceCall(current.session.id, 'mobile.socket.error', 'Socket de llamadas reportó un error', 'error');
       }
+      this.teardownRtc();
+      this.stopAudioModes();
       callStore.reset();
       try { Navigation.dismissOverlay('CallOverlay').catch(() => {}); } catch {}
     });
@@ -493,6 +504,8 @@ class CallService {
         'error',
       );
       await callNative.endCall(current.session.id, CALL_END_REASONS.FAILED);
+      this.teardownRtc();
+      this.stopAudioModes();
       callStore.reset();
       try { Navigation.dismissOverlay('CallOverlay').catch(() => {}); } catch {}
     }
@@ -506,7 +519,6 @@ class CallService {
 
     this.recentSystemAnswerByCallId.delete(current.session.id);
 
-    InCallManager.stopRingtone();
     callStore.patch({ phase: 'ending' });
     this.teardownRtc();
     this.stopAudioModes();
@@ -612,6 +624,7 @@ class CallService {
       error: null,
       startedAt: null,
     });
+    this.startOutgoingRingback();
     this.showCallOverlay();
   }
 
@@ -648,7 +661,7 @@ class CallService {
     this.showCallOverlay();
 
     if (Platform.OS === 'android' && this.appState === 'active') {
-      InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
+      this.startIncomingRingtone();
     }
 
     if (presentSystemCall) {
@@ -678,6 +691,9 @@ class CallService {
   }
 
   private async handleAccepted(session: CallSessionPayload) {
+    // Socket and push can deliver acceptance nearly simultaneously. Stop any
+    // local ringing before filtering a duplicate state transition.
+    this.stopCallTones();
     const current = callStore.getState();
     if (current.session?.id === session.id && (current.phase === 'connecting' || current.phase === 'active')) {
       return;
@@ -930,6 +946,7 @@ class CallService {
       }
 
       if (peer.connectionState === 'failed') {
+        this.stopAudioModes();
         callStore.patch({
           phase: 'error',
           error: 'La conexión de audio falló',
@@ -970,7 +987,6 @@ class CallService {
       return;
     }
 
-    InCallManager.stopRingtone();
     this.stopAudioModes();
     this.teardownRtc();
     await this.clearPendingIncomingCall(session.id);
@@ -1012,7 +1028,7 @@ class CallService {
 
   private async applyPushEvent(
     parsed: ParsedCallPush,
-    source: 'fcm' | 'voip',
+    source: 'fcm' | 'hms' | 'voip',
   ) {
     if (parsed.event === 'incoming') {
       if (!parsed.session) {
@@ -1118,9 +1134,66 @@ class CallService {
   }
 
   private stopAudioModes() {
+    this.stopCallTones();
     InCallManager.stop();
     InCallManager.setKeepScreenOn(false);
     InCallManager.setForceSpeakerphoneOn(false);
+  }
+
+  private startOutgoingRingback() {
+    if (this.activeCallTone === 'ringback') {
+      return;
+    }
+
+    this.stopCallTones();
+    try {
+      InCallManager.startRingback('_DEFAULT_');
+      this.activeCallTone = 'ringback';
+    } catch (error) {
+      const callId = callStore.getState().session?.id;
+      if (callId) {
+        this.traceCall(
+          callId,
+          'mobile.audio.ringback_failed',
+          error instanceof Error ? error.message : 'No fue posible reproducir el tono de llamada',
+          'warn',
+        );
+      }
+    }
+  }
+
+  private startIncomingRingtone() {
+    if (this.activeCallTone === 'ringtone') {
+      return;
+    }
+
+    this.stopCallTones();
+    try {
+      InCallManager.startRingtone('_DEFAULT_', [0, 800, 250], 'default', -1);
+      this.activeCallTone = 'ringtone';
+    } catch (error) {
+      const callId = callStore.getState().session?.id;
+      if (callId) {
+        this.traceCall(
+          callId,
+          'mobile.audio.ringtone_failed',
+          error instanceof Error ? error.message : 'No fue posible reproducir el timbre',
+          'warn',
+        );
+      }
+    }
+  }
+
+  private stopCallTones() {
+    // Call events may be duplicated or reordered across socket and push. Both
+    // native stop operations are intentionally unconditional and idempotent.
+    try {
+      InCallManager.stopRingtone();
+    } catch {}
+    try {
+      InCallManager.stopRingback();
+    } catch {}
+    this.activeCallTone = null;
   }
 
   private teardownRtc() {
@@ -1169,7 +1242,7 @@ class CallService {
       }
 
       try {
-        InCallManager.stopRingtone();
+        this.stopCallTones();
         const stream = await this.withTimeout(
           mediaDevices
             .getUserMedia({ audio: true, video: false })
@@ -1605,6 +1678,17 @@ class CallService {
       );
     }
 
+    if (this.registeredHmsToken) {
+      unregisterJobs.push(
+        unregisterCallDevice({
+          token: this.registeredHmsToken,
+          channel: 'hms',
+          platform: 'android',
+          deviceId,
+        }),
+      );
+    }
+
     if (Platform.OS === 'ios' && this.registeredVoipToken) {
       unregisterJobs.push(
         unregisterCallDevice({
@@ -1648,6 +1732,28 @@ class CallService {
     const hasMessagingPermission = await this.ensureMessagingPermission();
     if (!hasMessagingPermission) {
       return;
+    }
+
+    if (Platform.OS === 'android') {
+      const provider = await selectAndroidPushProvider();
+      if (provider === 'hms') {
+        try {
+          const token = await getHuaweiPushToken();
+          if (token) {
+            this.registeredHmsToken = token;
+            await this.registerCallPushToken({
+              token,
+              channel: 'hms',
+              platform: 'android',
+              deviceId,
+            });
+            await this.consumePendingHuaweiPush();
+            return;
+          }
+        } catch (error) {
+          console.warn('No fue posible obtener el token HMS', error);
+        }
+      }
     }
 
     await this.ensureIosRemoteMessagingRegistration();
@@ -1781,7 +1887,7 @@ class CallService {
   private async registerCallPushToken(input: {
     token: string;
     platform: 'android' | 'ios';
-    channel: 'fcm' | 'voip';
+    channel: 'fcm' | 'hms' | 'voip';
     environment?: 'development' | 'production' | null;
     deviceId?: string | null;
   }) {
@@ -1798,6 +1904,20 @@ class CallService {
       deviceId,
       appVersion: null,
     });
+  }
+
+  private async consumePendingHuaweiPush() {
+    if (Platform.OS !== 'android' || !this.activeToken) {
+      return;
+    }
+    const payload = await consumePendingHuaweiMessage().catch(() => null);
+    if (!payload) {
+      return;
+    }
+    const parsed = this.parseCallPush(payload);
+    if (parsed) {
+      await this.applyPushEvent(parsed, 'hms');
+    }
   }
 
   private async handleVoipToken(token: string) {

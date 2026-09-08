@@ -45,6 +45,7 @@ export interface CallSessionPayload {
   createdAt: string;
   acceptedAt: string | null;
   endedAt: string | null;
+  expiresAt?: string | null;
 }
 
 export interface IceConfigResponse {

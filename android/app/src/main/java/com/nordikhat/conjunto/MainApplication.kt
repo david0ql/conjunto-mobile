@@ -7,6 +7,7 @@ import com.facebook.react.ReactNativeHost
 import com.reactnativenavigation.NavigationApplication
 import com.reactnativenavigation.NavigationPackage
 import com.reactnativenavigation.react.NavigationReactNativeHost
+import com.nordikhat.conjunto.push.HuaweiPushPackage
 
 class MainApplication : NavigationApplication() {
   override val reactNativeHost: ReactNativeHost =
@@ -18,6 +19,7 @@ class MainApplication : NavigationApplication() {
         override fun getPackages() =
             PackageList(this).packages.apply {
               add(NavigationPackage())
+              add(HuaweiPushPackage())
             }
 
         override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED

@@ -69,6 +69,14 @@ react {
 def enableProguardInReleaseBuilds = false
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file("keystore.properties")
+def hmsConfigFile = file("agconnect-services.json")
+def hmsPushRequested = providers.gradleProperty("enableHmsPush").orElse("false").get().toBoolean()
+def hmsPushEnabled = hmsPushRequested && hmsConfigFile.exists()
+if (hmsPushEnabled) {
+    apply plugin: "com.huawei.agconnect"
+} else if (hmsPushRequested) {
+    logger.warn("HMS Push disabled: android/app/agconnect-services.json is missing")
+}
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
@@ -98,6 +106,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 4
         versionName "1.0"
+        buildConfigField "boolean", "HMS_PUSH_ENABLED", hmsPushEnabled.toString()
     }
     signingConfigs {
         debug {
@@ -130,6 +139,7 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    implementation("com.huawei.hms:push:6.13.0.301")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
