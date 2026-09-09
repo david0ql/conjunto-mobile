@@ -8,12 +8,30 @@ import { PairingNebula } from '../components/PairingNebula';
 import { pushScreen, popScreen } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import {
+  getMyProfile,
   getMyFamily,
   getMyApartments,
   getMemberQr,
   resolveImageUrl,
+  canManageFamily,
   type FamilyMember,
+  type ResidentProfile,
 } from '../services/api';
+import { authStore } from '../context/auth.store';
+
+function profileToMember(me: ResidentProfile): FamilyMember {
+  return {
+    id: me.id,
+    name: me.name,
+    lastName: me.lastName,
+    document: me.document ?? null,
+    phone: me.phone ?? null,
+    email: me.email ?? null,
+    photoPath: null,
+    isActive: true,
+    residentType: me.residentType,
+  };
+}
 
 function MemberPhotoModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
   if (!uri) return null;
@@ -111,12 +129,24 @@ export function FamilyListScreen({ componentId }: NavigationComponentProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [previewPhotoUri, setPreviewPhotoUri] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
+  const [canAddFamily, setCanAddFamily] = useState(() =>
+    canManageFamily(authStore.getUser()),
+  );
 
   function fetchFamily(isRefresh = false) {
     if (isRefresh) setRefreshing(true);
-    Promise.all([getMyFamily(), getMyApartments()])
-      .then(([list, apts]) => {
-        setMembers(list);
+    Promise.all([getMyProfile(), getMyFamily(), getMyApartments()])
+      .then(([me, list, apts]) => {
+        setCanAddFamily(
+          canManageFamily({
+            residentType: me.residentType?.code ?? null,
+            residentTypeLabel: me.residentType?.name ?? null,
+          }),
+        );
+        const merged = list.some(m => m.id === me.id)
+          ? list
+          : [profileToMember(me), ...list];
+        setMembers(merged);
         setApartmentId(apts[0]?.apartmentId ?? null);
       })
       .catch(() => {})
@@ -131,6 +161,8 @@ export function FamilyListScreen({ componentId }: NavigationComponentProps) {
     return () => sub.remove();
   }, [componentId]);
 
+  const visibleMembers = members.filter(m => m.isActive);
+
   return (
     <NoirScreen onRefresh={() => fetchFamily(true)} refreshing={refreshing}>
       <NoirTopBar leftIcon="arrow-back" onLeftPress={() => popScreen(componentId)} />
@@ -141,14 +173,14 @@ export function FamilyListScreen({ componentId }: NavigationComponentProps) {
 
         {loading ? (
           <ActivityIndicator color={noirTheme.surfaceHighest} size="large" style={styles.loading} />
-        ) : members.length === 0 ? (
+        ) : visibleMembers.length === 0 ? (
           <View style={styles.empty}>
             <MaterialIcons color={noirTheme.surfaceHighest} name="groups" size={64} />
             <Text style={styles.emptyText}>Aún no has agregado familiares</Text>
           </View>
         ) : (
           <View style={styles.list}>
-            {members.map((member) => {
+            {visibleMembers.map((member) => {
               const photoUri = resolveImageUrl(member.photoPath);
               return (
                 <View key={member.id} style={styles.row}>
@@ -188,11 +220,13 @@ export function FamilyListScreen({ componentId }: NavigationComponentProps) {
           </View>
         )}
 
-        <PrimaryButton
-          label="Agregar familiar"
-          onPress={() => pushScreen(componentId, COMPONENTS.familyCreate)}
-          style={styles.addButton}
-        />
+        {canAddFamily ? (
+          <PrimaryButton
+            label="Agregar familiar"
+            onPress={() => pushScreen(componentId, COMPONENTS.familyCreate)}
+            style={styles.addButton}
+          />
+        ) : null}
       </View>
 
       <MemberPhotoModal uri={previewPhotoUri} onClose={() => setPreviewPhotoUri(null)} />

@@ -13,6 +13,24 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function formatBirthDate(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 8);
+  if (digits.length === 0) return '';
+  let out = digits.slice(0, 4);
+  if (digits.length === 4) return `${out}-`;
+  if (digits.length > 4) out += `-${digits.slice(4, 6)}`;
+  if (digits.length === 6) return `${out}-`;
+  if (digits.length > 6) out += `-${digits.slice(6, 8)}`;
+  return out;
+}
+
+function isValidBirthDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
 export function FamilyCreateScreen({ componentId }: NavigationComponentProps) {
   const [name, setName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -70,6 +88,13 @@ export function FamilyCreateScreen({ componentId }: NavigationComponentProps) {
       setFeedback({
         title: 'Campos incompletos',
         message: 'Completa nombre, apellidos, documento, correo y toma la foto del familiar.',
+      });
+      return;
+    }
+    if (birthDate.trim() && !isValidBirthDate(birthDate.trim())) {
+      setFeedback({
+        title: 'Fecha inválida',
+        message: 'Ingresa la fecha de nacimiento completa en formato AAAA-MM-DD.',
       });
       return;
     }
@@ -160,7 +185,9 @@ export function FamilyCreateScreen({ componentId }: NavigationComponentProps) {
             placeholderTextColor={noirTheme.surfaceHighest}
             style={styles.input}
             value={birthDate}
-            onChangeText={setBirthDate}
+            onChangeText={(text) => setBirthDate(formatBirthDate(text))}
+            keyboardType="numeric"
+            maxLength={10}
           />
         </View>
 

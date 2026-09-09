@@ -295,6 +295,18 @@ export interface CreateFamilyMemberResult {
   generatedPassword: string;
 }
 
+export function canManageFamily(
+  user: { residentType?: string | null; residentTypeLabel?: string | null } | null,
+): boolean {
+  if (!user) return false;
+  const hay = `${user.residentType ?? ''} ${user.residentTypeLabel ?? ''}`
+    .toLowerCase()
+    .trim();
+  if (!hay) return false;
+  if (/familiar|family|relat|dependiente|guest/i.test(hay)) return false;
+  return /arrendatari|propietari|tenant|owner|renter|inquilino|titular/i.test(hay);
+}
+
 export interface Vehicle {
   id: string;
   plate: string;

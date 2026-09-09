@@ -162,7 +162,11 @@ function PackagePhotosModal({
 // ─── Visitor photo modal ──────────────────────────────────────────────────────
 
 function VisitorPhotoModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
-  if (!uri) return null;
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [uri]);
 
   return (
     <Modal
@@ -179,7 +183,20 @@ function VisitorPhotoModal({ uri, onClose }: { uri: string | null; onClose: () =
         </View>
 
         <View style={modalStyles.photoPreviewWrap}>
-          <Image source={{ uri }} style={modalStyles.photoPreview} resizeMode="contain" />
+          {uri ? (
+            loadFailed ? (
+              <MaterialIcons color={noirTheme.surfaceHighest} name="broken-image" size={64} />
+            ) : (
+              <Image
+                key={uri}
+                source={{ uri, cache: 'force-cache' }}
+                style={modalStyles.photoPreview}
+                resizeMode="contain"
+                fadeDuration={150}
+                onError={() => setLoadFailed(true)}
+              />
+            )
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -554,7 +571,7 @@ export function PorteriaLogScreen() {
                         onPress={() => visitorPhotoUri && setPreviewPhotoUri(visitorPhotoUri)}
                         style={styles.visitorAvatarPlaceholder}>
                         {visitorPhotoUri ? (
-                          <Image source={{ uri: visitorPhotoUri }} style={styles.visitorAvatarImage} resizeMode="cover" />
+                          <Image source={{ uri: visitorPhotoUri, cache: 'force-cache' }} style={styles.visitorAvatarImage} resizeMode="cover" fadeDuration={100} />
                         ) : (
                           <MaterialIcons
                             color={noirTheme.primary}
