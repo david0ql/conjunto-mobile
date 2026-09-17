@@ -88,6 +88,7 @@ jest.mock('../src/realtime/calls/callNative', () => ({
     initialize: jest.fn(async () => undefined),
     markCallActive: jest.fn(async () => undefined),
     markCallConnecting: jest.fn(async () => undefined),
+    answerIncomingCall: jest.fn(async () => undefined),
     syncSpeaker: jest.fn(async () => undefined),
     syncMuted: jest.fn(async () => undefined),
     endCall: jest.fn(async () => undefined),
@@ -353,5 +354,88 @@ describe('outgoing ringback tone', () => {
   it('the iOS project copies the ringback file into the app bundle', () => {
     const project = fs.readFileSync(path.join(root, 'ios/MyApp.xcodeproj/project.pbxproj'), 'utf8');
     expect(project).toMatch(/incallmanager_ringback\.mp3 in Resources \*\/,\n\t\t\t\);/);
+  });
+});
+
+describe('permissions asked again when placing or answering a call (Android)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const RN = require('react-native') as typeof import('react-native');
+  const { PermissionPromptError } = require('../src/services/permissions') as typeof import('../src/services/permissions');
+  type WithSocket = { socket: unknown; activeToken: string | null };
+  let emit: jest.Mock;
+
+  beforeEach(() => {
+    jest.replaceProperty(RN.Platform, 'OS', 'android');
+    (RN.AppState as unknown as { currentState: string }).currentState = 'active';
+    jest.spyOn(RN.Alert, 'alert').mockImplementation(() => undefined);
+    emit = jest.fn();
+    (callService as unknown as WithSocket).socket = { connected: true, disconnected: false, emit, connect: jest.fn(), on: jest.fn(), off: jest.fn() };
+    (callService as unknown as WithSocket).activeToken = 'token';
+    (callNative as unknown as { promptPhoneAccountIfNeeded: jest.Mock }).promptPhoneAccountIfNeeded = jest.fn(async () => undefined);
+    (mediaDevices.getUserMedia as jest.Mock).mockResolvedValue({ getAudioTracks: () => [], getTracks: () => [] });
+  });
+
+  afterEach(() => {
+    (callService as unknown as WithSocket).socket = null;
+    (callService as unknown as WithSocket).activeToken = null;
+    jest.restoreAllMocks();
+  });
+
+  const permissionResults = (values: Record<string, string>) => {
+    jest.spyOn(RN.PermissionsAndroid, 'check').mockResolvedValue(false);
+    return jest.spyOn(RN.PermissionsAndroid, 'requestMultiple').mockImplementation(async (list) =>
+      Object.fromEntries(list.map((item) => [item, values[item] ?? RN.PermissionsAndroid.RESULTS.GRANTED])) as never,
+    );
+  };
+
+  it('microphone blocked by Android: offers settings, does not start the call, no duplicate error alert', async () => {
+    permissionResults({ 'android.permission.RECORD_AUDIO': RN.PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN });
+
+    await expect(callService.startApartmentCall('apt-1')).rejects.toBeInstanceOf(PermissionPromptError);
+
+    expect(RN.Alert.alert).toHaveBeenCalledWith(expect.stringMatching(/micrófono/i), expect.any(String), expect.any(Array));
+    expect(emit).not.toHaveBeenCalled();
+    expect(callStore.getState().phase).toBe('idle');
+  });
+
+  it('microphone denied again: explains it and does not start the call', async () => {
+    permissionResults({ 'android.permission.RECORD_AUDIO': RN.PermissionsAndroid.RESULTS.DENIED });
+
+    await expect(callService.callPorter('porter-1')).rejects.toThrow('Debes permitir el micrófono');
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('microphone granted: re-asks the phone permission, offers system calls, and places the call even if phone is denied', async () => {
+    const request = permissionResults({ 'android.permission.CALL_PHONE': RN.PermissionsAndroid.RESULTS.DENIED });
+
+    await callService.startEmployeeCall('porter-2');
+
+    const asked = request.mock.calls.map(([list]) => list).flat();
+    expect(asked).toEqual(expect.arrayContaining(['android.permission.RECORD_AUDIO', 'android.permission.CALL_PHONE']));
+    expect((callNative as unknown as { promptPhoneAccountIfNeeded: jest.Mock }).promptPhoneAccountIfNeeded).toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('calls:initiate-porter', { employeeId: 'porter-2' });
+  });
+
+  it('answering from the app asks again for the microphone and answers anyway', async () => {
+    const request = permissionResults({ 'android.permission.RECORD_AUDIO': RN.PermissionsAndroid.RESULTS.DENIED });
+    callStore.setState({ session, phase: 'incoming', muted: false, speaker: true, error: null, startedAt: null });
+
+    await callService.acceptCurrentCall();
+
+    expect(request.mock.calls.map(([list]) => list).flat()).toContain('android.permission.RECORD_AUDIO');
+    expect(emit).toHaveBeenCalledWith('calls:accept', { callId: 'call-1' });
+  });
+
+  it('does not answer if the call ended while the permission dialog was open', async () => {
+    jest.spyOn(RN.PermissionsAndroid, 'check').mockResolvedValue(false);
+    jest.spyOn(RN.PermissionsAndroid, 'requestMultiple').mockImplementation(async (list) => {
+      callStore.reset(); // the caller hung up meanwhile
+      return Object.fromEntries(list.map((item) => [item, RN.PermissionsAndroid.RESULTS.GRANTED])) as never;
+    });
+    callStore.setState({ session, phase: 'incoming', muted: false, speaker: true, error: null, startedAt: null });
+
+    await callService.acceptCurrentCall();
+
+    expect(emit).not.toHaveBeenCalledWith('calls:accept', expect.anything());
   });
 });

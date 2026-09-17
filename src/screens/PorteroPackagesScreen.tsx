@@ -5,8 +5,6 @@ import {
   FlatList,
   Image,
   Modal,
-  PermissionsAndroid,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +20,7 @@ import { launchCamera } from 'react-native-image-picker';
 import { noirTheme } from '../design/theme';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
+import { requestPermission, showPermissionSettingsAlert } from '../services/permissions';
 import { assemblyService } from '../realtime/assemblies/assemblyService';
 import { setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
@@ -403,22 +402,13 @@ function CreatePackageModal({
 
   async function handleTakePhoto() {
     try {
-      if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          {
-            title: 'Permiso de Cámara',
-            message: 'La aplicación necesita acceso a la cámara para tomar fotos de los paquetes.',
-            buttonNeutral: 'Preguntar luego',
-            buttonNegative: 'Cancelar',
-            buttonPositive: 'OK',
-          },
-        );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          Alert.alert('Permiso denegado', 'No se puede usar la cámara sin permisos.');
-          return;
-        }
+      // Asks again every time; if Android blocked it, offers opening settings.
+      const camera = await requestPermission('camera');
+      if (camera === 'denied') {
+        Alert.alert('Permiso denegado', 'Necesitas permitir la cámara para tomar la foto.');
+        return;
       }
+      if (camera === 'blocked') return;
 
       const result = await launchCamera({
         mediaType: 'photo',
@@ -427,6 +417,10 @@ function CreatePackageModal({
         maxHeight: 1920,
         saveToPhotos: false,
       });
+      if (result.errorCode === 'permission') {
+        showPermissionSettingsAlert('camera');
+        return;
+      }
       if (result.didCancel || !result.assets?.[0]?.uri) return;
       const asset = result.assets[0];
       setPhoto({
@@ -605,6 +599,14 @@ function DeliverModal({
 
   async function handleTakePhoto() {
     try {
+      // Asks again every time; if Android blocked it, offers opening settings.
+      const camera = await requestPermission('camera');
+      if (camera === 'denied') {
+        Alert.alert('Permiso denegado', 'Necesitas permitir la cámara para tomar la foto.');
+        return;
+      }
+      if (camera === 'blocked') return;
+
       const result = await launchCamera({
         mediaType: 'photo',
         quality: 0.7,
@@ -612,6 +614,10 @@ function DeliverModal({
         maxHeight: 1920,
         saveToPhotos: false,
       });
+      if (result.errorCode === 'permission') {
+        showPermissionSettingsAlert('camera');
+        return;
+      }
       if (result.didCancel || !result.assets?.[0]?.uri) return;
       const asset = result.assets[0];
       setPhoto({

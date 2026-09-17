@@ -19,6 +19,7 @@ import {
 } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
 import { callService } from '../realtime/calls/callService';
+import { PermissionPromptError } from '../services/permissions';
 import { callStore } from '../realtime/calls/callStore';
 import {
   getMyPackagesPage,
@@ -349,6 +350,7 @@ export function PorteriaLogScreen() {
     try {
       await callService.callPorter(porter.id);
     } catch (error) {
+      if (error instanceof PermissionPromptError) return;
       Alert.alert(
         'No fue posible llamar a portería',
         error instanceof Error ? error.message : 'Intenta nuevamente en unos segundos.',

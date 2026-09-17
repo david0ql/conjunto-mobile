@@ -28,6 +28,11 @@ import {
 import { io, type Socket } from 'socket.io-client';
 import { authStore } from '../../context/auth.store';
 import {
+  PermissionPromptError,
+  requestPermission as requestAppPermission,
+  showPermissionSettingsAlert,
+} from '../../services/permissions';
+import {
   getCallPorters,
   getCallsIceConfig,
   REALTIME_URL,
@@ -332,10 +337,7 @@ class CallService {
       throw new Error('El canal en tiempo real no está conectado');
     }
 
-    const hasPermission = await this.ensureMicrophonePermission();
-    if (!hasPermission) {
-      throw new Error('Debes habilitar el micrófono para llamar a portería');
-    }
+    await this.ensureCallPermissions();
 
     callStore.setState({
       session: null,
@@ -377,10 +379,7 @@ class CallService {
       throw new Error('El canal en tiempo real no está conectado');
     }
 
-    const hasPermission = await this.ensureMicrophonePermission();
-    if (!hasPermission) {
-      throw new Error('Debes habilitar el micrófono para llamar');
-    }
+    await this.ensureCallPermissions();
 
     callStore.setState({
       session: null,
@@ -427,10 +426,7 @@ class CallService {
       throw new Error('No puedes llamarte a ti mismo');
     }
 
-    const hasPermission = await this.ensureMicrophonePermission();
-    if (!hasPermission) {
-      throw new Error('Debes habilitar el micrófono para llamar');
-    }
+    await this.ensureCallPermissions();
 
     callStore.setState({
       session: null,
@@ -463,7 +459,7 @@ class CallService {
 
   async acceptCurrentCall(fromSystem = false) {
     await this.restorePendingIncomingCall();
-    const current = callStore.getState();
+    let current = callStore.getState();
     if (!current.session) {
       return;
     }
@@ -472,6 +468,16 @@ class CallService {
       return;
     }
 
+    // Answering from the app: ask again for the microphone if it was denied,
+    // so the person can talk. The call is answered either way.
+    if (!fromSystem && Platform.OS === 'android' && AppState.currentState === 'active') {
+      const callId = current.session.id;
+      await requestAppPermission('microphone');
+      current = callStore.getState();
+      if (current.session?.id !== callId || (current.phase !== 'incoming' && current.phase !== 'requesting-media')) {
+        return;
+      }
+    }
     if (fromSystem) {
       this.traceCall(current.session.id, 'mobile.system.answer_processing', 'Procesando respuesta desde UI nativa');
     }
@@ -1098,6 +1104,32 @@ class CallService {
     const response = (await getCallsIceConfig()) as IceConfigResponse;
     this.iceServers = response.iceServers;
     return response.iceServers;
+  }
+
+  /**
+   * Before placing a call: the microphone is required (asked again, or the
+   * settings are offered if Android blocked it); the phone permission and the
+   * system calls account are asked again but do not block the call.
+   */
+  private async ensureCallPermissions() {
+    if (Platform.OS === 'android') {
+      const microphone = await requestAppPermission('microphone');
+      if (microphone === 'blocked') {
+        throw new PermissionPromptError('Micrófono bloqueado');
+      }
+      if (microphone !== 'granted') {
+        throw new Error('Debes permitir el micrófono para poder llamar.');
+      }
+      await requestAppPermission('phone', { promptSettingsIfBlocked: false });
+      void callNative.promptPhoneAccountIfNeeded().catch(() => undefined);
+      return;
+    }
+
+    const granted = await this.ensureMicrophonePermission(true);
+    if (!granted) {
+      showPermissionSettingsAlert('microphone');
+      throw new PermissionPromptError('Micrófono bloqueado');
+    }
   }
 
   private async ensureMicrophonePermission(isWarmup = false) {

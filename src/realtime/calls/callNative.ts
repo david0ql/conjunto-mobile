@@ -1,4 +1,4 @@
-import { Alert, AppState, Linking, PermissionsAndroid, Platform } from 'react-native';
+import { Alert, AppState, Linking, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import notifee, {
   AndroidCategory,
   AndroidForegroundServiceType,
@@ -102,14 +102,22 @@ class CallNativeManager {
   }
 
   private async doInitialize() {
+    // Channels first and on their own: starting the foreground service with a
+    // notification on a missing channel makes Android kill the app
+    // ("Bad notification for startForeground"). Previously a cancelled CallKeep
+    // dialog skipped this step on fresh installs.
+    try {
+      await this.ensureChannels();
+    } catch (error) {
+      console.warn('No fue posible crear los canales de notificación', error);
+    }
     try {
       if (Platform.OS === 'android') {
-        await this.setupAndroidCallKeep();
+        this.setupAndroidCallKeep();
       } else {
         await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
       }
       RNCallKeep.setReachable();
-      await this.ensureChannels();
     } catch (error) {
       console.warn('callNative initialization parcialmente fallida', error);
     }
@@ -656,6 +664,11 @@ class CallNativeManager {
     );
   }
 
+  /** Called when placing a call: offers enabling the system calls account (once per session). */
+  async promptPhoneAccountIfNeeded() {
+    await this.maybePromptPhoneAccount();
+  }
+
   private async maybePromptPhoneAccount() {
     if (this.hasPromptedPhoneAccount || Platform.OS !== 'android' || AppState.currentState !== 'active') {
       return;
@@ -676,40 +689,30 @@ class CallNativeManager {
     } catch {}
     Alert.alert(
       'Activa llamadas del sistema',
-      'Para que la llamada entrante aparezca como una llamada real, acepta el servicio de llamadas del intercom cuando Android lo pida.',
-      [{ text: 'Entendido' }],
+      'Para que la llamada entrante aparezca como una llamada real, habilita el servicio de llamadas del intercom en los ajustes de cuentas de llamada.',
+      [
+        { text: 'Ahora no', style: 'cancel' },
+        {
+          text: 'Abrir ajustes',
+          onPress: () => {
+            try {
+              NativeModules.RNCallKeep.openPhoneAccounts();
+            } catch {}
+          },
+        },
+      ],
     );
   }
 
-  private async setupAndroidCallKeep() {
-    try {
-      await RNCallKeep.setup(CALLKEEP_OPTIONS as any);
-      return;
-    } catch (error) {
-      if (!this.isMissingCurrentActivityError(error)) {
-        throw error;
-      }
-    }
-
-    RNCallKeep.setSettings(CALLKEEP_OPTIONS as any);
-    RNCallKeep.registerPhoneAccount(CALLKEEP_OPTIONS as any);
-    RNCallKeep.registerAndroidEvents();
-  }
-
-  private isMissingCurrentActivityError(error: unknown) {
-    if (typeof error === 'string') {
-      return error.toLowerCase().includes("activity doesn't exist");
-    }
-
-    if (error instanceof Error) {
-      return error.message.toLowerCase().includes("activity doesn't exist");
-    }
-
-    if (error && typeof error === 'object' && 'code' in error) {
-      return String((error as { code?: unknown }).code) === 'E_ACTIVITY_DOES_NOT_EXIST';
-    }
-
-    return false;
+  /**
+   * Native CallKeep setup only (settings, phone account, events, availability).
+   * RNCallKeep.setup() on Android additionally blocks on an Alert whose
+   * "Cancelar" rejects and whose outside tap never resolves, which left the
+   * app without notification channels or hung its initialization. The
+   * phone-account prompt is shown later, non-blocking (maybePromptPhoneAccount).
+   */
+  private setupAndroidCallKeep() {
+    NativeModules.RNCallKeep.setup(CALLKEEP_OPTIONS.android);
   }
 
   private async displayForegroundNotification(options: {
@@ -723,6 +726,18 @@ class CallNativeManager {
     timestamp?: number;
     foregroundServiceTypes: AndroidForegroundServiceType[];
   }) {
+    // Android kills the app if the service notification has no channel, and
+    // a microphone-type service without the microphone permission throws.
+    try {
+      await this.ensureChannels();
+      if (!(await notifee.getChannel(options.channelId))) {
+        return;
+      }
+    } catch {
+      return;
+    }
+    const foregroundServiceTypes = await this.allowedForegroundServiceTypes(options.foregroundServiceTypes);
+
     await notifee.displayNotification({
       id: SERVICE_NOTIFICATION_ID,
       title: options.title,
@@ -740,9 +755,28 @@ class CallNativeManager {
         showChronometer: options.showChronometer,
         timestamp: options.timestamp,
         visibility: AndroidVisibility.PUBLIC,
-        foregroundServiceTypes: options.foregroundServiceTypes,
+        foregroundServiceTypes,
       },
     });
+  }
+
+  private async allowedForegroundServiceTypes(types: AndroidForegroundServiceType[]) {
+    if (!types.includes(AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_MICROPHONE)) {
+      return types;
+    }
+    let micGranted = false;
+    try {
+      micGranted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+    } catch {}
+    if (micGranted) {
+      return types;
+    }
+    const withoutMic = types.filter(
+      (type) => type !== AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+    );
+    return withoutMic.length > 0
+      ? withoutMic
+      : [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_DATA_SYNC];
   }
 
   private getCallerName(session?: CallSessionPayload | null) {

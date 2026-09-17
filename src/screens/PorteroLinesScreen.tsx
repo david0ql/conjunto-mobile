@@ -14,6 +14,7 @@ import { NavigationComponentProps } from 'react-native-navigation';
 import { authStore } from '../context/auth.store';
 import { noirTheme } from '../design/theme';
 import { callService } from '../realtime/calls/callService';
+import { PermissionPromptError } from '../services/permissions';
 import { callStore } from '../realtime/calls/callStore';
 import type { PorterAvailability } from '../services/api';
 
@@ -40,6 +41,7 @@ export function PorteroLinesScreen({ componentId: _componentId }: NavigationComp
     try {
       await callService.startEmployeeCall(porter.id);
     } catch (error) {
+      if (error instanceof PermissionPromptError) return;
       Alert.alert(
         'No fue posible llamar',
         error instanceof Error ? error.message : 'Intenta nuevamente.',

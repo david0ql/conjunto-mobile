@@ -17,6 +17,7 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { NavigationComponentProps } from 'react-native-navigation';
 import { noirTheme } from '../design/theme';
 import { callService } from '../realtime/calls/callService';
+import { PermissionPromptError } from '../services/permissions';
 import { callStore } from '../realtime/calls/callStore';
 import {
   getTowers,
@@ -58,6 +59,7 @@ export function PorteroCallScreen({
     try {
       await callService.startApartmentCall(apt.id);
     } catch (error) {
+      if (error instanceof PermissionPromptError) return;
       Alert.alert(
         'No fue posible llamar',
         error instanceof Error ? error.message : 'Intenta nuevamente.',

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, Modal, Platform, PermissionsAndroid, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { launchCamera } from 'react-native-image-picker';
@@ -8,6 +8,7 @@ import { Eyebrow, NoirScreen, NoirTopBar, PrimaryButton } from '../components/No
 import { noirTheme } from '../design/theme';
 import { popScreen } from '../navigation/root';
 import { createFamilyMember, ApiError } from '../services/api';
+import { requestPermission, showPermissionSettingsAlert } from '../services/permissions';
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -52,22 +53,13 @@ export function FamilyCreateScreen({ componentId }: NavigationComponentProps) {
 
   async function handleTakePhoto() {
     try {
-      if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          {
-            title: 'Permiso de Cámara',
-            message: 'La aplicación necesita acceso a la cámara para tomar la foto del familiar.',
-            buttonNeutral: 'Preguntar luego',
-            buttonNegative: 'Cancelar',
-            buttonPositive: 'OK',
-          },
-        );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          setFeedback({ title: 'Permiso denegado', message: 'No se puede usar la cámara sin permisos.' });
-          return;
-        }
+      // Asks again every time; if Android blocked it, offers opening settings.
+      const camera = await requestPermission('camera');
+      if (camera === 'denied') {
+        setFeedback({ title: 'Permiso denegado', message: 'Necesitas permitir la cámara para tomar la foto del familiar.' });
+        return;
       }
+      if (camera === 'blocked') return;
 
       const result = await launchCamera({
         mediaType: 'photo',
@@ -76,6 +68,10 @@ export function FamilyCreateScreen({ componentId }: NavigationComponentProps) {
         maxHeight: 1920,
         saveToPhotos: false,
       });
+      if (result.errorCode === 'permission') {
+        showPermissionSettingsAlert('camera');
+        return;
+      }
       if (result.didCancel || !result.assets?.[0]?.uri) return;
       setPhotoUri(result.assets[0].uri);
     } catch {
