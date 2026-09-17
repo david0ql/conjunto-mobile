@@ -109,6 +109,9 @@ class CallService {
   private registeredHmsToken: string | null = null;
   private hasPromptedMessagingSettings = false;
   private activeCallTone: 'ringtone' | 'ringback' | null = null;
+  /** Last time the app itself changed the audio route (to ignore its own echo events). */
+  private audioRouteAppliedAt = 0;
+  private audioRouteTimers: Array<ReturnType<typeof setTimeout>> = [];
 
   bootstrap() {
     if (this.bootstrapped) {
@@ -127,6 +130,15 @@ class CallService {
         },
         onOpenCallUi: async () => {
           await this.handleOpenCallUi();
+        },
+        onAudioSessionActivated: () => {
+          this.scheduleAudioRouteReapply();
+        },
+        onAudioRouteChanged: (output, callId) => {
+          this.handleNativeAudioRouteChanged(output, callId);
+        },
+        onMutedChanged: (callId, muted) => {
+          this.handleNativeMutedChanged(callId, muted);
         },
       })
       .catch((error) => {
@@ -342,7 +354,7 @@ class CallService {
 
       InCallManager.start({ media: 'audio', auto: true });
       InCallManager.setKeepScreenOn(true);
-      InCallManager.setForceSpeakerphoneOn(true);
+      InCallManager.setForceSpeakerphoneOn(callStore.getState().speaker);
 
       this.socket.emit('calls:call-porter', { employeeId });
     } catch (error) {
@@ -387,7 +399,7 @@ class CallService {
 
       InCallManager.start({ media: 'audio', auto: true });
       InCallManager.setKeepScreenOn(true);
-      InCallManager.setForceSpeakerphoneOn(true);
+      InCallManager.setForceSpeakerphoneOn(callStore.getState().speaker);
 
       this.socket.emit('calls:initiate', { apartmentId });
     } catch (error) {
@@ -437,7 +449,7 @@ class CallService {
 
       InCallManager.start({ media: 'audio', auto: true });
       InCallManager.setKeepScreenOn(true);
-      InCallManager.setForceSpeakerphoneOn(true);
+      InCallManager.setForceSpeakerphoneOn(callStore.getState().speaker);
 
       this.socket.emit('calls:initiate-porter', { employeeId });
     } catch (error) {
@@ -538,11 +550,7 @@ class CallService {
     const current = callStore.getState();
     const next = !current.muted;
     callStore.patch({ muted: next });
-    if (this.localStream) {
-      this.localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !next;
-      });
-    }
+    this.applyMuteToLocalStream();
     const callId = current.session?.id;
     if (callId) {
       void callNative.syncMuted(callId, next).catch(() => undefined);
@@ -553,6 +561,7 @@ class CallService {
     const current = callStore.getState();
     const next = !current.speaker;
     callStore.patch({ speaker: next });
+    this.audioRouteAppliedAt = Date.now();
     InCallManager.setForceSpeakerphoneOn(next);
     const callId = current.session?.id;
     if (callId) {
@@ -625,6 +634,8 @@ class CallService {
       startedAt: null,
     });
     this.startOutgoingRingback();
+    // The ringback tone must follow the speaker button too.
+    this.scheduleAudioRouteReapply();
     this.showCallOverlay();
   }
 
@@ -725,7 +736,7 @@ class CallService {
       await callNative.markCallConnecting(session, startedAt);
       InCallManager.start({ media: 'audio', auto: true });
       InCallManager.setKeepScreenOn(true);
-      InCallManager.setForceSpeakerphoneOn(true);
+      this.scheduleAudioRouteReapply();
       this.traceCall(session.id, 'mobile.accept.confirmed', 'Evento accepted recibido para llamada outbound');
       if (currentUser?.type === 'employee' && session.initiatedByEmployeeId === currentUser.id) {
         await this.startOfferForCall(session);
@@ -749,7 +760,7 @@ class CallService {
     // so InCallManager won't conflict with it.
     InCallManager.start({ media: 'audio', auto: true });
     InCallManager.setKeepScreenOn(true);
-    InCallManager.setForceSpeakerphoneOn(true);
+    this.scheduleAudioRouteReapply();
     await this.startOfferForCall(session);
   }
 
@@ -838,6 +849,7 @@ class CallService {
       const startedAt = current.startedAt ?? Date.now();
       callStore.patch({ phase: 'active', error: null, startedAt });
       await callNative.markCallActive(current.session, startedAt);
+      this.scheduleAudioRouteReapply();
       this.traceCall(callId, 'mobile.answer.sent', 'Respuesta enviada al originador');
       return;
     }
@@ -879,6 +891,7 @@ class CallService {
         const startedAt = current.startedAt ?? Date.now();
         callStore.patch({ phase: 'active', error: null, startedAt });
         await callNative.markCallActive(current.session, startedAt);
+        this.scheduleAudioRouteReapply();
         this.clearOfferRetryRequest(callId);
         this.traceCall(callId, 'mobile.call.active', 'Respuesta remota recibida, llamada activa');
       } finally {
@@ -941,7 +954,9 @@ class CallService {
         const startedAt = current.startedAt ?? Date.now();
         callStore.patch({ phase: 'active', error: null, startedAt });
         if (current.session) {
-          void callNative.markCallActive(current.session, startedAt);
+          void callNative
+            .markCallActive(current.session, startedAt)
+            .then(() => this.scheduleAudioRouteReapply());
         }
       }
 
@@ -1133,7 +1148,71 @@ class CallService {
     return this.micWarmupPromise;
   }
 
+  /**
+   * Applies the speaker button state to the real output. Android's call
+   * service resets the route to the earpiece when the call becomes active and
+   * iOS drops routes set before CallKit activates the audio session, so the
+   * preference is re-applied a few times while audio settles.
+   */
+  private scheduleAudioRouteReapply() {
+    const callId = callStore.getState().session?.id;
+    if (!callId) {
+      return;
+    }
+    this.audioRouteTimers.forEach((timer) => clearTimeout(timer));
+    this.audioRouteTimers = [0, 400, 1_500, 3_000].map((delay) =>
+      setTimeout(() => this.applyAudioRoute(callId), delay),
+    );
+  }
+
+  private applyAudioRoute(callId: string) {
+    const current = callStore.getState();
+    if (current.session?.id !== callId || !['ringing', 'connecting', 'active'].includes(current.phase)) {
+      return;
+    }
+    this.audioRouteAppliedAt = Date.now();
+    InCallManager.setForceSpeakerphoneOn(current.speaker);
+    void callNative.syncSpeaker(callId, current.speaker).catch(() => undefined);
+  }
+
+  /** The route changed outside the app (system call screen, Bluetooth, headset). */
+  private handleNativeAudioRouteChanged(output: string, callId: string | null) {
+    const current = callStore.getState();
+    if (!current.session || (callId && callId !== current.session.id)) {
+      return;
+    }
+    if (!['connecting', 'active'].includes(current.phase)) {
+      return;
+    }
+    // Our own (re)applies echo back as route events; ignore them.
+    if (Date.now() - this.audioRouteAppliedAt < 3_500) {
+      return;
+    }
+    const speaker = /speaker/i.test(output);
+    if (speaker !== current.speaker) {
+      callStore.patch({ speaker });
+    }
+  }
+
+  private handleNativeMutedChanged(callId: string, muted: boolean) {
+    const current = callStore.getState();
+    if (current.session?.id !== callId || current.muted === muted) {
+      return;
+    }
+    callStore.patch({ muted });
+    this.applyMuteToLocalStream();
+  }
+
+  private applyMuteToLocalStream() {
+    const { muted } = callStore.getState();
+    this.localStream?.getAudioTracks().forEach((track) => {
+      track.enabled = !muted;
+    });
+  }
+
   private stopAudioModes() {
+    this.audioRouteTimers.forEach((timer) => clearTimeout(timer));
+    this.audioRouteTimers = [];
     this.stopCallTones();
     InCallManager.stop();
     InCallManager.setKeepScreenOn(false);
@@ -1147,7 +1226,9 @@ class CallService {
 
     this.stopCallTones();
     try {
-      InCallManager.startRingback('_DEFAULT_');
+      // '_DEFAULT_' is the phone's own ringtone (the "someone is calling you"
+      // sound). The bundled file is a real ringback tone: 425 Hz, 1s on / 4s off.
+      InCallManager.startRingback('_BUNDLE_');
       this.activeCallTone = 'ringback';
     } catch (error) {
       const callId = callStore.getState().session?.id;
@@ -1254,9 +1335,11 @@ class CallService {
           throw new Error('Timeout solicitando micrófono');
         }
         this.localStream = stream;
+        // A new microphone stream starts unmuted: honour the mute button.
+        this.applyMuteToLocalStream();
         InCallManager.start({ media: 'audio', auto: true });
         InCallManager.setKeepScreenOn(true);
-        InCallManager.setForceSpeakerphoneOn(true);
+        this.scheduleAudioRouteReapply();
         this.attachLocalStreamToCurrentPeer(callId);
         this.traceCall(callId, 'mobile.media.ready', 'Micrófono local listo para la llamada');
         return true;

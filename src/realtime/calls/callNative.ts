@@ -24,6 +24,12 @@ export interface CallNativeHandlers {
   onAnswerCall: (callId: string) => Promise<void> | void;
   onEndCall: (callId: string) => Promise<void> | void;
   onOpenCallUi: () => Promise<void> | void;
+  /** iOS: CallKit activated the audio session (routes set before this are lost). */
+  onAudioSessionActivated?: () => void;
+  /** The system changed the audio output (system call screen, Bluetooth, headset…). */
+  onAudioRouteChanged?: (output: string, callId: string | null) => void;
+  /** Mute toggled from the system call screen. */
+  onMutedChanged?: (callId: string, muted: boolean) => void;
 }
 
 const READY_CHANNEL_ID = 'intercom-ready';
@@ -268,7 +274,7 @@ class CallNativeManager {
   }
 
   async syncMuted(callId: string, muted: boolean) {
-    if (!callId || Platform.OS !== 'ios') {
+    if (!callId) {
       return;
     }
 
@@ -511,6 +517,22 @@ class CallNativeManager {
 
     RNCallKeep.addEventListener('checkReachability', () => {
       RNCallKeep.setReachable();
+    });
+
+    RNCallKeep.addEventListener('didActivateAudioSession', () => {
+      this.handlers?.onAudioSessionActivated?.();
+    });
+
+    RNCallKeep.addEventListener('didChangeAudioRoute', (event) => {
+      if (typeof event?.output === 'string') {
+        this.handlers?.onAudioRouteChanged?.(event.output, event.callUUID ?? null);
+      }
+    });
+
+    RNCallKeep.addEventListener('didPerformSetMutedCallAction', (event) => {
+      if (event?.callUUID && typeof event.muted === 'boolean') {
+        this.handlers?.onMutedChanged?.(event.callUUID, event.muted);
+      }
     });
 
     notifee.onForegroundEvent((event) => {
