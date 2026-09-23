@@ -16,7 +16,13 @@ import { Divider, NoirScreen, PrimaryButton } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
 import { setPoolRoot, setPorteroRoot, setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
-import { loginResident, loginEmployee, requestPasswordResetByEmail, ApiError } from '../services/api';
+import {
+  loginResident,
+  loginEmployee,
+  requestPasswordResetByEmail,
+  canUseBiometricLogin,
+  ApiError,
+} from '../services/api';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
 import { assemblyService } from '../realtime/assemblies/assemblyService';
@@ -81,7 +87,7 @@ export function LoginScreen() {
     })();
   }, []);
 
-  async function performLogin(id: string, pw: string, remember = rememberMe) {
+  async function performLogin(id: string, pw: string, forceRemember?: boolean) {
     setLoading(true);
     try {
       const isEmail = id.includes('@');
@@ -91,11 +97,41 @@ export function LoginScreen() {
 
       await authStore.setSession(response.accessToken, response.user);
 
+      // Biometric eligibility depends on the account's role (porters commonly
+      // share one login with no individual user), which is only known once
+      // the API responds — so the "save password / enable biometric" ask
+      // happens here, right after a successful login, not before it.
+      const allowBiometric = !!biometryType && canUseBiometricLogin(response.user);
+      let remember = forceRemember ?? rememberMe;
+      let enableBiometric = false;
+
+      if (allowBiometric && !biometricLoginAvailable) {
+        enableBiometric = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Guardar contraseña',
+            `¿Deseas guardar tu contraseña e iniciar sesión con ${biometryLabel(biometryType)} la próxima vez?`,
+            [
+              { text: 'Ahora no', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Sí, guardar', onPress: () => resolve(true) },
+            ],
+          );
+        });
+        if (enableBiometric) {
+          remember = true;
+          setRememberMe(true);
+        }
+      }
+
       if (remember) {
         await credentialsStore.save(id, pw);
-        if (biometryType) {
+        if (allowBiometric && enableBiometric) {
           await credentialsStore.saveBiometric(id, pw);
           setBiometricLoginAvailable(true);
+        } else if (!allowBiometric) {
+          // Shared porter account: never leave a stale biometric entry that
+          // would let anyone's fingerprint on this device unlock it.
+          await credentialsStore.clearBiometric();
+          setBiometricLoginAvailable(false);
         }
       } else {
         await credentialsStore.clear();
@@ -149,33 +185,9 @@ export function LoginScreen() {
       return;
     }
 
-    // If the user hasn't enrolled biometric login yet, ask up front — before
-    // starting the session — whether they want their password saved and
-    // biometric login enabled, instead of saving it silently after login.
-    if (biometryType && !biometricLoginAvailable) {
-      Alert.alert(
-        'Guardar contraseña',
-        `¿Deseas guardar tu contraseña e iniciar sesión con ${biometryLabel(biometryType)} la próxima vez?`,
-        [
-          {
-            text: 'Ahora no',
-            style: 'cancel',
-            onPress: () => {
-              performLogin(id, pw, rememberMe);
-            },
-          },
-          {
-            text: 'Sí, guardar',
-            onPress: () => {
-              setRememberMe(true);
-              performLogin(id, pw, true);
-            },
-          },
-        ],
-      );
-      return;
-    }
-
+    // Whether to ask about saving the password with biometric login depends
+    // on the account's role, known only after login succeeds — see
+    // performLogin.
     await performLogin(id, pw);
   }
 

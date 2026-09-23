@@ -26,6 +26,13 @@ export interface SessionUser {
   residentType?: string;
   residentTypeLabel?: string;
   role?: string;
+  /**
+   * Explicit override from the backend for whether this account may enroll
+   * biometric (Face ID / fingerprint) login. Undefined/null means "no
+   * override" — the client falls back to its own default (see
+   * canUseBiometricLogin), which excludes shared-credential porter accounts.
+   */
+  biometricLoginAllowed?: boolean | null;
 }
 
 export interface AuthResponse {
@@ -293,6 +300,28 @@ export interface CreateFamilyMemberInput {
 export interface CreateFamilyMemberResult {
   resident: FamilyMember;
   generatedPassword: string;
+}
+
+/**
+ * Whether biometric (Face ID / fingerprint) login may be enrolled for this
+ * account. Porters commonly share one login across a team with no individual
+ * user assigned, so a fingerprint enrolled on a shared device would unlock
+ * the account for anyone whose biometrics happen to be registered on it —
+ * disabled by default for that case. Plain "remember password" still works
+ * for everyone regardless of this flag.
+ *
+ * `biometricLoginAllowed` lets the backend override the default per account
+ * once individual porter users exist.
+ */
+export function canUseBiometricLogin(
+  user: Pick<SessionUser, 'type' | 'role' | 'biometricLoginAllowed'> | null,
+): boolean {
+  if (!user) return false;
+  if (typeof user.biometricLoginAllowed === 'boolean') {
+    return user.biometricLoginAllowed;
+  }
+  const isSharedPorterAccount = user.type === 'employee' && user.role === 'porter';
+  return !isSharedPorterAccount;
 }
 
 export function canManageFamily(
