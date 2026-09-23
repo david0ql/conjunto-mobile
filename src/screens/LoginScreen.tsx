@@ -90,8 +90,6 @@ export function LoginScreen() {
         : await loginEmployee(id, pw);
 
       await authStore.setSession(response.accessToken, response.user);
-      callService.start(response.accessToken);
-      assemblyService.start(response.accessToken);
 
       if (remember) {
         await credentialsStore.save(id, pw);
@@ -105,6 +103,11 @@ export function LoginScreen() {
         setBiometricLoginAvailable(false);
       }
 
+      // Navigate away from the login screen first: callService/assemblyService
+      // trigger native permission prompts (notifications, calls) in the
+      // background, and letting one of those dialogs show while this screen's
+      // root transition is still in flight can drop the transition, leaving
+      // the user stuck on Login needing to sign in again.
       if (response.user.type === 'employee') {
         if (response.user.role === 'pool_attendant') {
           setPoolRoot();
@@ -114,6 +117,9 @@ export function LoginScreen() {
       } else {
         setShellRoot(COMPONENTS.homeNews);
       }
+
+      callService.start(response.accessToken);
+      assemblyService.start(response.accessToken);
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {

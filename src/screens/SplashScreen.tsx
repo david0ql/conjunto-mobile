@@ -21,11 +21,6 @@ export function SplashScreen() {
         // Verify the stored token is still valid
         try {
           await getMe();
-          const token = authStore.getToken();
-          if (token) {
-            callService.start(token);
-            assemblyService.start(token);
-          }
           const user = authStore.getUser();
           if (user?.type === 'employee') {
             if (user.role === 'pool_attendant') {
@@ -35,6 +30,11 @@ export function SplashScreen() {
             }
           } else {
             setShellRoot(COMPONENTS.homeNews);
+          }
+          const token = authStore.getToken();
+          if (token) {
+            callService.start(token);
+            assemblyService.start(token);
           }
         } catch {
           // Token is invalid or expired — clear and go to login
