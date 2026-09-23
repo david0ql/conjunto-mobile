@@ -39,6 +39,8 @@
 	<string>Necesitamos la cámara para tomar fotos de los paquetes y comprobantes de entrega.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Necesitamos el microfono para atender llamadas del intercom residencial.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Usamos Face ID para iniciar sesión de forma rápida y segura.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIAppFonts</key>

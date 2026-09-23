@@ -453,6 +453,10 @@ export async function getMe(): Promise<SessionUser> {
   return request<SessionUser>('GET', '/auth/me');
 }
 
+export async function requestPasswordResetByEmail(email: string): Promise<{ emailSent: boolean }> {
+  return request<{ emailSent: boolean }>('POST', '/password-resets/request-by-email', { email }, false);
+}
+
 // ─── News ─────────────────────────────────────────────────────────────────────
 
 export async function getNews(): Promise<NewsItem[]> {

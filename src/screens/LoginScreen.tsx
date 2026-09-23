@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -10,35 +11,77 @@ import {
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { BIOMETRY_TYPE } from 'react-native-keychain';
 import { Divider, NoirScreen, PrimaryButton } from '../components/NoirUI';
 import { noirTheme } from '../design/theme';
 import { setPoolRoot, setPorteroRoot, setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
-import { loginResident, loginEmployee, ApiError } from '../services/api';
+import { loginResident, loginEmployee, requestPasswordResetByEmail, ApiError } from '../services/api';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
 import { assemblyService } from '../realtime/assemblies/assemblyService';
 import { useStableScreenLayout } from '../hooks/useStableScreenLayout';
+import { credentialsStore } from '../services/credentials.store';
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+type ForgotStatus = 'idle' | 'loading' | 'success' | 'error';
+
+function biometryIconName(type: BIOMETRY_TYPE | null): string {
+  if (type === BIOMETRY_TYPE.FACE_ID || type === BIOMETRY_TYPE.FACE) {
+    return 'face';
+  }
+  return 'fingerprint';
+}
+
+function biometryLabel(type: BIOMETRY_TYPE | null): string {
+  if (type === BIOMETRY_TYPE.FACE_ID || type === BIOMETRY_TYPE.FACE) {
+    return 'Face ID';
+  }
+  if (type === BIOMETRY_TYPE.IRIS) {
+    return 'iris';
+  }
+  return 'huella';
+}
 
 export function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [biometryType, setBiometryType] = useState<BIOMETRY_TYPE | null>(null);
+  const [biometricLoginAvailable, setBiometricLoginAvailable] = useState(false);
+  const [forgotVisible, setForgotVisible] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotStatus, setForgotStatus] = useState<ForgotStatus>('idle');
+  const [forgotMessage, setForgotMessage] = useState('');
   const { hasLayout, layout, onLayout } = useStableScreenLayout();
 
   const measuredWidth = hasLayout ? layout.width : undefined;
   const measuredHeight = hasLayout ? layout.height : undefined;
 
-  async function handleLogin() {
-    const id = identifier.trim();
-    const pw = password.trim();
+  useEffect(() => {
+    (async () => {
+      const saved = await credentialsStore.get();
+      if (saved) {
+        setIdentifier(saved.identifier);
+        setPassword(saved.password);
+        setRememberMe(true);
+      }
 
-    if (!id || !pw) {
-      Alert.alert('Campos requeridos', 'Ingresa tu usuario/correo y contraseña.');
-      return;
-    }
+      const supportedBiometry = await credentialsStore.getSupportedBiometryType();
+      setBiometryType(supportedBiometry);
+      if (supportedBiometry) {
+        const hasBiometricCreds = await credentialsStore.hasBiometricCredentials();
+        setBiometricLoginAvailable(hasBiometricCreds);
+      }
+    })();
+  }, []);
 
+  async function performLogin(id: string, pw: string, remember = rememberMe) {
     setLoading(true);
     try {
       const isEmail = id.includes('@');
@@ -49,6 +92,18 @@ export function LoginScreen() {
       await authStore.setSession(response.accessToken, response.user);
       callService.start(response.accessToken);
       assemblyService.start(response.accessToken);
+
+      if (remember) {
+        await credentialsStore.save(id, pw);
+        if (biometryType) {
+          await credentialsStore.saveBiometric(id, pw);
+          setBiometricLoginAvailable(true);
+        }
+      } else {
+        await credentialsStore.clear();
+        await credentialsStore.clearBiometric();
+        setBiometricLoginAvailable(false);
+      }
 
       if (response.user.type === 'employee') {
         if (response.user.role === 'pool_attendant') {
@@ -76,6 +131,95 @@ export function LoginScreen() {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleLogin() {
+    const id = identifier.trim();
+    const pw = password.trim();
+
+    if (!id || !pw) {
+      Alert.alert('Campos requeridos', 'Ingresa tu usuario/correo y contraseña.');
+      return;
+    }
+
+    // If the user hasn't enrolled biometric login yet, ask up front — before
+    // starting the session — whether they want their password saved and
+    // biometric login enabled, instead of saving it silently after login.
+    if (biometryType && !biometricLoginAvailable) {
+      Alert.alert(
+        'Guardar contraseña',
+        `¿Deseas guardar tu contraseña e iniciar sesión con ${biometryLabel(biometryType)} la próxima vez?`,
+        [
+          {
+            text: 'Ahora no',
+            style: 'cancel',
+            onPress: () => {
+              performLogin(id, pw, rememberMe);
+            },
+          },
+          {
+            text: 'Sí, guardar',
+            onPress: () => {
+              setRememberMe(true);
+              performLogin(id, pw, true);
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    await performLogin(id, pw);
+  }
+
+  async function handleBiometricLogin() {
+    const saved = await credentialsStore.getBiometric(
+      `Inicia sesión con tu ${biometryLabel(biometryType)}`,
+    );
+    if (!saved) return;
+
+    setIdentifier(saved.identifier);
+    setPassword(saved.password);
+    setRememberMe(true);
+    await performLogin(saved.identifier, saved.password, true);
+  }
+
+  function openForgotPassword() {
+    setForgotEmail(identifier.includes('@') ? identifier.trim() : '');
+    setForgotStatus('idle');
+    setForgotMessage('');
+    setForgotVisible(true);
+  }
+
+  function closeForgotPassword() {
+    setForgotVisible(false);
+  }
+
+  async function handleForgotSubmit() {
+    const email = forgotEmail.trim();
+    if (!isValidEmail(email)) {
+      setForgotStatus('error');
+      setForgotMessage('Ingresa un correo válido.');
+      return;
+    }
+
+    setForgotStatus('loading');
+    try {
+      await requestPasswordResetByEmail(email);
+      setForgotStatus('success');
+      setForgotMessage(
+        'Se realizó el envío del correo de cambio de contraseña. Revisa tu bandeja de entrada.',
+      );
+    } catch (error) {
+      setForgotStatus('error');
+      if (error instanceof ApiError && error.status === 404) {
+        setForgotMessage('El correo no está asociado a ningún usuario.');
+      } else if (error instanceof ApiError) {
+        setForgotMessage(error.message || 'No fue posible procesar la solicitud.');
+      } else {
+        setForgotMessage('No se pudo conectar al servidor. Verifica tu red.');
+      }
     }
   }
 
@@ -172,24 +316,130 @@ export function LoginScreen() {
                     </View>
                   </View>
 
-                  <PrimaryButton
-                    label={loading ? '' : 'Ingresar'}
-                    onPress={handleLogin}
-                    style={styles.loginButton}
-                    textStyle={loading ? styles.hiddenButtonLabel : undefined}
-                  />
-                  {loading ? (
-                    <ActivityIndicator
-                      color="#000"
-                      style={StyleSheet.absoluteFill}
-                    />
-                  ) : null}
+                  <View style={styles.optionsRow}>
+                    <Pressable
+                      style={styles.rememberRow}
+                      onPress={() => setRememberMe(!rememberMe)}>
+                      <MaterialIcons
+                        name={rememberMe ? 'check-box' : 'check-box-outline-blank'}
+                        size={20}
+                        color={rememberMe ? noirTheme.primary : noirTheme.surfaceHighest}
+                      />
+                      <Text style={styles.rememberLabel}>Recordar contraseña</Text>
+                    </Pressable>
+
+                    <Pressable onPress={openForgotPassword} style={styles.forgotRow}>
+                      <Text style={styles.forgotLabel}>¿Olvidaste tu contraseña?</Text>
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.loginButtonRow}>
+                    <View style={styles.loginButtonWrap}>
+                      <PrimaryButton
+                        label={loading ? '' : 'Ingresar'}
+                        onPress={handleLogin}
+                        style={styles.loginButton}
+                        textStyle={loading ? styles.hiddenButtonLabel : undefined}
+                      />
+                      {loading ? (
+                        <ActivityIndicator
+                          color="#000"
+                          style={StyleSheet.absoluteFill}
+                        />
+                      ) : null}
+                    </View>
+
+                    {biometricLoginAvailable ? (
+                      <Pressable
+                        style={styles.biometricButton}
+                        onPress={handleBiometricLogin}
+                        disabled={loading}
+                        accessibilityLabel={`Iniciar sesión con ${biometryLabel(biometryType)}`}>
+                        <MaterialIcons
+                          name={biometryIconName(biometryType)}
+                          size={30}
+                          color={noirTheme.primary}
+                        />
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
               </View>
             </View>
           </View>
         </KeyboardAwareScrollView>
       </View>
+
+      <Modal
+        visible={forgotVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={closeForgotPassword}>
+        <View style={styles.forgotOverlay}>
+          <View style={styles.forgotCard}>
+            {forgotStatus === 'success' ? (
+              <>
+                <MaterialIcons color={noirTheme.primary} name="mark-email-read" size={40} />
+                <Text style={styles.forgotTitle}>Correo enviado</Text>
+                <Text style={styles.forgotDesc}>{forgotMessage}</Text>
+                <PrimaryButton
+                  label="Entendido"
+                  onPress={closeForgotPassword}
+                  style={styles.forgotButton}
+                />
+              </>
+            ) : (
+              <>
+                <MaterialIcons color={noirTheme.primary} name="lock-reset" size={40} />
+                <Text style={styles.forgotTitle}>Recuperar contraseña</Text>
+                <Text style={styles.forgotDesc}>
+                  Escribe tu correo registrado y te enviaremos un enlace para cambiar tu
+                  contraseña.
+                </Text>
+                <TextInput
+                  placeholder="correo@dominio.com"
+                  placeholderTextColor={noirTheme.surfaceHighest}
+                  style={styles.forgotInput}
+                  value={forgotEmail}
+                  onChangeText={(value) => {
+                    setForgotEmail(value);
+                    if (forgotStatus === 'error') {
+                      setForgotStatus('idle');
+                      setForgotMessage('');
+                    }
+                  }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  editable={forgotStatus !== 'loading'}
+                />
+                {forgotStatus === 'error' ? (
+                  <Text style={styles.forgotError}>{forgotMessage}</Text>
+                ) : null}
+                <View style={styles.forgotActions}>
+                  <Pressable
+                    onPress={closeForgotPassword}
+                    style={styles.forgotCancel}
+                    disabled={forgotStatus === 'loading'}>
+                    <Text style={styles.forgotCancelLabel}>Cancelar</Text>
+                  </Pressable>
+                  <View style={styles.forgotSubmitWrap}>
+                    <PrimaryButton
+                      label={forgotStatus === 'loading' ? '' : 'Enviar'}
+                      onPress={handleForgotSubmit}
+                      style={styles.forgotButton}
+                      textStyle={forgotStatus === 'loading' ? styles.hiddenButtonLabel : undefined}
+                    />
+                    {forgotStatus === 'loading' ? (
+                      <ActivityIndicator color="#000" style={StyleSheet.absoluteFill} />
+                    ) : null}
+                  </View>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </NoirScreen>
   );
 }
@@ -307,11 +557,122 @@ const styles = StyleSheet.create({
     bottom: 8,
     padding: 4,
   },
-  loginButton: {
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  rememberLabel: {
+    color: noirTheme.secondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  loginButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
     marginTop: 8,
+  },
+  loginButtonWrap: {
+    flex: 1,
+  },
+  loginButton: {
     minHeight: 64,
+  },
+  biometricButton: {
+    width: 64,
+    minHeight: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: noirTheme.outline,
+    backgroundColor: noirTheme.surfaceLow,
   },
   hiddenButtonLabel: {
     display: 'none',
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: -8,
+  },
+  forgotRow: {
+    paddingVertical: 2,
+  },
+  forgotLabel: {
+    color: noirTheme.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  forgotOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  forgotCard: {
+    width: '100%',
+    backgroundColor: noirTheme.surfaceLow,
+    padding: 28,
+    alignItems: 'center',
+    gap: 14,
+  },
+  forgotTitle: {
+    color: noirTheme.primary,
+    fontSize: 20,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: -0.6,
+  },
+  forgotDesc: {
+    color: noirTheme.secondary,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  forgotInput: {
+    width: '100%',
+    color: noirTheme.ink,
+    fontSize: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: noirTheme.outline,
+    paddingVertical: 10,
+    textAlign: 'center',
+  },
+  forgotError: {
+    color: '#d64545',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  forgotActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    marginTop: 8,
+  },
+  forgotCancel: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: noirTheme.outline,
+  },
+  forgotCancelLabel: {
+    color: noirTheme.secondary,
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  forgotSubmitWrap: {
+    flex: 1,
+  },
+  forgotButton: {
+    minHeight: 52,
+    width: '100%',
   },
 });
