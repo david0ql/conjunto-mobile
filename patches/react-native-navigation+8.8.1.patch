@@ -1,0 +1,32 @@
+diff --git a/node_modules/react-native-navigation/ios/RNNOverlayWindow.mm b/node_modules/react-native-navigation/ios/RNNOverlayWindow.mm
+index 2aeba93..f590a27 100644
+--- a/node_modules/react-native-navigation/ios/RNNOverlayWindow.mm
++++ b/node_modules/react-native-navigation/ios/RNNOverlayWindow.mm
+@@ -3,6 +3,27 @@
+ 
+ @implementation RNNOverlayWindow
+ 
++// With UIScene lifecycle (mandatory on the iOS 27 SDK) a window created with
++// initWithFrame: has no windowScene and is never shown, so attach overlays to
++// the app's window scene.
++- (instancetype)initWithFrame:(CGRect)frame {
++    UIWindowScene *windowScene = UIApplication.sharedApplication.delegate.window.windowScene;
++    if (windowScene == nil) {
++        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
++            if ([scene isKindOfClass:[UIWindowScene class]]) {
++                windowScene = (UIWindowScene *)scene;
++                break;
++            }
++        }
++    }
++    if (windowScene != nil) {
++        self = [super initWithWindowScene:windowScene];
++        self.frame = frame;
++        return self;
++    }
++    return [super initWithFrame:frame];
++}
++
+ - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+     UIView *hitTestResult = [super hitTest:point withEvent:event];
+ 

@@ -82,6 +82,29 @@ class AppDelegate: RNNAppDelegate, PKPushRegistryDelegate {
   }
 }
 
+// The iOS 27 SDK requires the UIScene lifecycle (an app without it crashes on
+// launch). react-native-navigation creates its window in didFinishLaunching,
+// before any scene exists, so attach that same window to the scene here.
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+  ) {
+    guard let windowScene = scene as? UIWindowScene else {
+      return
+    }
+    let appDelegate = UIApplication.shared.delegate as? AppDelegate
+    let window = appDelegate?.window ?? UIWindow(windowScene: windowScene)
+    window.windowScene = windowScene
+    appDelegate?.window = window
+    self.window = window
+    window.makeKeyAndVisible()
+  }
+}
+
 class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
   override func sourceURL(for bridge: RCTBridge) -> URL? {
     self.bundleURL()
