@@ -132,6 +132,14 @@ export function PorteroCallScreen({
                   style={styles.aptCell}
                   onPress={() => handleCallApt(item)}
                 >
+                  <View
+                    style={[
+                      styles.statusDot,
+                      item.hasAppResident
+                        ? styles.statusDotGreen
+                        : styles.statusDotRed,
+                    ]}
+                  />
                   <MaterialIcons
                     name="phone-in-talk"
                     size={16}
@@ -236,6 +244,21 @@ const styles = StyleSheet.create({
     backgroundColor: noirTheme.surfaceLow,
     borderWidth: 1,
     borderColor: noirTheme.outline,
+    position: 'relative',
+  },
+  statusDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusDotGreen: {
+    backgroundColor: '#22c55e',
+  },
+  statusDotRed: {
+    backgroundColor: '#ef4444',
   },
   aptNumber: {
     color: noirTheme.primary,

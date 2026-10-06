@@ -26,6 +26,7 @@ import {
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
 import { assemblyService } from '../realtime/assemblies/assemblyService';
+import { warnAboutMissingPermissions } from '../services/permissions';
 import { useStableScreenLayout } from '../hooks/useStableScreenLayout';
 import { credentialsStore } from '../services/credentials.store';
 
@@ -156,6 +157,7 @@ export function LoginScreen() {
 
       callService.start(response.accessToken);
       assemblyService.start(response.accessToken);
+      setTimeout(() => void warnAboutMissingPermissions(), 1500);
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {

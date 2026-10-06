@@ -104,7 +104,7 @@ android {
         applicationId "com.nordikhat.conjunto"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10
+        versionCode 12
         versionName "1.0.0"
         buildConfigField "boolean", "HMS_PUSH_ENABLED", hmsPushEnabled.toString()
     }

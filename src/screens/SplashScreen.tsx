@@ -6,9 +6,10 @@ import { noirTheme } from '../design/theme';
 import { setPoolRoot, setPorteroRoot, setShellRoot } from '../navigation/root';
 import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
-import { getMe } from '../services/api';
+import { ApiError, getMe } from '../services/api';
 import { callService } from '../realtime/calls/callService';
 import { assemblyService } from '../realtime/assemblies/assemblyService';
+import { warnAboutMissingPermissions } from '../services/permissions';
 
 export function SplashScreen() {
   useEffect(() => {
@@ -18,31 +19,42 @@ export function SplashScreen() {
       await authStore.init();
 
       if (authStore.isAuthenticated()) {
-        // Verify the stored token is still valid
+        // Try to verify the stored token, but don't log the user out just
+        // because there's no network — only the server explicitly rejecting
+        // the token (401/403) should end the session. Otherwise the user
+        // loses their session every time they open the app offline, and
+        // with it the ability to receive calls once connectivity returns.
         try {
           await getMe();
-          const user = authStore.getUser();
-          if (user?.type === 'employee') {
-            if (user.role === 'pool_attendant') {
-              setPoolRoot();
-            } else {
-              setPorteroRoot();
-            }
-          } else {
-            setShellRoot(COMPONENTS.homeNews);
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+            await callService.stop();
+            assemblyService.stop();
+            await authStore.clearSession();
+            setShellRoot(COMPONENTS.login);
+            return;
           }
-          const token = authStore.getToken();
-          if (token) {
-            callService.start(token);
-            assemblyService.start(token);
-          }
-        } catch {
-          // Token is invalid or expired — clear and go to login
-          await callService.stop();
-          assemblyService.stop();
-          await authStore.clearSession();
-          setShellRoot(COMPONENTS.login);
+          // Network/server error — keep the cached session and proceed below.
         }
+
+        const user = authStore.getUser();
+        if (user?.type === 'employee') {
+          if (user.role === 'pool_attendant') {
+            setPoolRoot();
+          } else {
+            setPorteroRoot();
+          }
+        } else {
+          setShellRoot(COMPONENTS.homeNews);
+        }
+        const token = authStore.getToken();
+        if (token) {
+          callService.start(token);
+          assemblyService.start(token);
+        }
+        // Checked after the root transition and call service kick-off (not
+        // before) so this summary alert never races the screen change.
+        setTimeout(() => void warnAboutMissingPermissions(), 1500);
       } else {
         // No token stored — go to login after a short branded delay
         void callService.stop();

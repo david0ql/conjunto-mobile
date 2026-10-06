@@ -147,6 +147,7 @@ export interface ApartmentItem {
   floor?: number | null;
   towerId: string;
   residentCount?: number;
+  hasAppResident?: boolean;
   towerData?: { id: string; name: string; code: string };
 }
 

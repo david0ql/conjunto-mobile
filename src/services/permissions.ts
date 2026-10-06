@@ -1,4 +1,5 @@
 import { Alert, Linking, PermissionsAndroid, Platform, type Permission } from 'react-native';
+import notifee, { AuthorizationStatus } from '@notifee/react-native';
 
 /**
  * Asks again for a permission at the moment it is needed (a call, a photo).
@@ -61,6 +62,102 @@ export function showPermissionSettingsAlert(permission: AppPermission) {
       },
     },
   ]);
+}
+
+export type EssentialPermissionCheck = {
+  key: AppPermission | 'notifications' | 'battery';
+  label: string;
+  granted: boolean;
+};
+
+async function isMicrophoneGranted(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+}
+
+async function isCameraGranted(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA);
+}
+
+async function isPhoneGranted(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const checks = await Promise.all(androidPermissions('phone').map((item) => PermissionsAndroid.check(item)));
+  return checks.every(Boolean);
+}
+
+async function isNotificationsGranted(): Promise<boolean> {
+  try {
+    const settings = await notifee.getNotificationSettings();
+    return settings.authorizationStatus >= AuthorizationStatus.AUTHORIZED;
+  } catch {
+    return true;
+  }
+}
+
+async function isBatteryUnrestricted(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  try {
+    const restricted = await notifee.isBatteryOptimizationEnabled();
+    return !restricted;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Reads the current status of every permission the app needs to reliably
+ * place/receive intercom calls, send notifications and take photos. This
+ * only checks — it never pops a system prompt — so it's safe to run on
+ * every app open, even offline.
+ */
+export async function checkEssentialPermissions(): Promise<EssentialPermissionCheck[]> {
+  const [microphone, camera, phone, notifications, battery] = await Promise.all([
+    isMicrophoneGranted(),
+    isCameraGranted(),
+    isPhoneGranted(),
+    isNotificationsGranted(),
+    isBatteryUnrestricted(),
+  ]);
+
+  return [
+    { key: 'microphone', label: COPY.microphone.title, granted: microphone },
+    { key: 'camera', label: COPY.camera.title, granted: camera },
+    { key: 'phone', label: COPY.phone.title, granted: phone },
+    { key: 'notifications', label: 'Notificaciones', granted: notifications },
+    { key: 'battery', label: 'Ahorro de batería desactivado', granted: battery },
+  ];
+}
+
+/**
+ * Shows a single summary alert listing every permission still missing for
+ * the app to work correctly (calls, notifications, photos). Meant to run
+ * once per app open so the user always knows what to fix, instead of
+ * stumbling into a silent failure (e.g. a call that never rings) later.
+ */
+export async function warnAboutMissingPermissions(): Promise<void> {
+  const checks = await checkEssentialPermissions();
+  const missing = checks.filter((c) => !c.granted);
+  if (missing.length === 0) return;
+
+  const list = missing.map((c) => `• ${c.label}`).join('\n');
+  Alert.alert(
+    'Permisos pendientes',
+    `Para que la app reciba llamadas, avisos de portería y funcione sin interrupciones, activa:\n\n${list}\n\nSin esto la app puede no sonar cuando te llamen.`,
+    [
+      { text: 'Ahora no', style: 'cancel' },
+      {
+        text: 'Abrir ajustes',
+        onPress: () => {
+          if (missing.some((c) => c.key === 'battery') && Platform.OS === 'android') {
+            notifee.openBatteryOptimizationSettings().catch(() => void Linking.openSettings());
+          } else {
+            void Linking.openSettings();
+          }
+        },
+      },
+    ],
+  );
 }
 
 /**
