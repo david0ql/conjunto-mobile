@@ -33,14 +33,16 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
 	<key>NSCameraUsageDescription</key>
 	<string>Necesitamos la cámara para tomar fotos de los paquetes y comprobantes de entrega.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Necesitamos el microfono para atender llamadas del intercom residencial.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Usamos Face ID para iniciar sesión de forma rápida y segura.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string></string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Necesitamos el microfono para atender llamadas del intercom residencial.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Necesitamos acceso a tus fotos para adjuntar imágenes de paquetes y comprobantes de entrega.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIAppFonts</key>
