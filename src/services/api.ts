@@ -266,6 +266,7 @@ export interface ResidentProfile {
   document?: string | null;
   phone?: string | null;
   email?: string | null;
+  photoPath?: string | null;
   apartmentId?: string | null;
   apartment?: {
     id: string;
@@ -577,6 +578,16 @@ export async function getMyAccessEntries(apartmentId?: string): Promise<AccessEn
 
 export async function getMyProfile(): Promise<ResidentProfile> {
   return request<ResidentProfile>('GET', '/residents/me');
+}
+
+export async function updateMyPhoto(photo: { uri: string; fileName?: string; type?: string }): Promise<ResidentProfile> {
+  const fd = new FormData();
+  fd.append('photo', {
+    uri: photo.uri,
+    name: photo.fileName ?? 'photo.jpg',
+    type: photo.type ?? 'image/jpeg',
+  } as any);
+  return requestMultipart<ResidentProfile>('PATCH', '/residents/me/photo', fd);
 }
 
 export async function getMyApartments(): Promise<ResidentApartment[]> {

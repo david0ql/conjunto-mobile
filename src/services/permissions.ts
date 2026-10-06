@@ -1,7 +1,17 @@
-import { Alert, Linking, PermissionsAndroid, Platform, type Permission } from 'react-native';
-import notifee, { AuthorizationStatus } from '@notifee/react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { mediaDevices } from 'react-native-webrtc';
+import { Alert, AppState, Linking, PermissionsAndroid, Platform, type Permission } from 'react-native';
+import notifee from '@notifee/react-native';
+import {
+  PERMISSIONS,
+  RESULTS,
+  checkMultiple,
+  checkNotifications,
+  request,
+  requestMultiple,
+  requestNotifications,
+  type Permission as NativePermission,
+  type PermissionStatus,
+} from 'react-native-permissions';
+import { callStore } from '../realtime/calls/callStore';
 
 /**
  * Asks again for a permission at the moment it is needed (a call, a photo).
@@ -72,29 +82,20 @@ export type EssentialPermissionCheck = {
   granted: boolean;
 };
 
-async function isMicrophoneGranted(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
-  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
-}
-
-async function isCameraGranted(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
-  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA);
-}
-
-async function isPhoneGranted(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
-  const checks = await Promise.all(androidPermissions('phone').map((item) => PermissionsAndroid.check(item)));
-  return checks.every(Boolean);
-}
-
-async function isNotificationsGranted(): Promise<boolean> {
-  try {
-    const settings = await notifee.getNotificationSettings();
-    return settings.authorizationStatus >= AuthorizationStatus.AUTHORIZED;
-  } catch {
-    return true;
+function nativePermissions(permission: AppPermission): NativePermission[] {
+  if (Platform.OS === 'ios') {
+    if (permission === 'microphone') return [PERMISSIONS.IOS.MICROPHONE];
+    if (permission === 'camera') return [PERMISSIONS.IOS.CAMERA];
+    // CallKit needs no permission on iOS.
+    return [];
   }
+  return androidPermissions(permission) as NativePermission[];
+}
+
+const STARTUP_PERMISSIONS: AppPermission[] = ['microphone', 'camera', 'phone'];
+
+function isUsable(status: PermissionStatus | undefined): boolean {
+  return status === RESULTS.GRANTED || status === RESULTS.LIMITED || status === RESULTS.UNAVAILABLE;
 }
 
 async function isBatteryUnrestricted(): Promise<boolean> {
@@ -109,98 +110,134 @@ async function isBatteryUnrestricted(): Promise<boolean> {
 
 /**
  * Reads the current status of every permission the app needs to reliably
- * place/receive intercom calls, send notifications and take photos. This
- * only checks — it never pops a system prompt — so it's safe to run on
- * every app open, even offline.
+ * place/receive intercom calls, send notifications and take photos. When
+ * `prompt` is set, anything the system can still ask for is requested first
+ * (one system dialog per permission); blocked ones are only reported.
  */
-export async function checkEssentialPermissions(): Promise<EssentialPermissionCheck[]> {
-  const [microphone, camera, phone, notifications, battery] = await Promise.all([
-    isMicrophoneGranted(),
-    isCameraGranted(),
-    isPhoneGranted(),
-    isNotificationsGranted(),
-    isBatteryUnrestricted(),
-  ]);
+export async function checkEssentialPermissions(
+  { prompt = false }: { prompt?: boolean } = {},
+): Promise<EssentialPermissionCheck[]> {
+  const groups = STARTUP_PERMISSIONS.map((key) => ({ key, items: nativePermissions(key) }));
+  const all = groups.flatMap((group) => group.items);
+
+  let statuses = (all.length ? await checkMultiple(all) : {}) as Record<string, PermissionStatus>;
+  let notifications = (await checkNotifications()).status;
+
+  if (prompt) {
+    const askable = all.filter((item) => statuses[item] === RESULTS.DENIED);
+    if (askable.length) {
+      statuses = { ...statuses, ...(await requestMultiple(askable)) };
+    }
+    if (notifications === RESULTS.DENIED) {
+      notifications = (await requestNotifications(['alert', 'sound', 'badge'])).status;
+    }
+  }
+
+  const battery = await isBatteryUnrestricted();
 
   return [
-    { key: 'microphone', label: COPY.microphone.title, granted: microphone },
-    { key: 'camera', label: COPY.camera.title, granted: camera },
-    { key: 'phone', label: COPY.phone.title, granted: phone },
-    { key: 'notifications', label: 'Notificaciones', granted: notifications },
+    ...groups.map(({ key, items }) => ({
+      key,
+      label: COPY[key].title,
+      granted: items.every((item) => isUsable(statuses[item])),
+    })),
+    { key: 'notifications', label: 'Notificaciones', granted: isUsable(notifications) },
     { key: 'battery', label: 'Ahorro de batería desactivado', granted: battery },
   ];
 }
 
-/**
- * Shows a single summary alert listing every permission still missing for
- * the app to work correctly (calls, notifications, photos). Meant to run
- * once per app open so the user always knows what to fix, instead of
- * stumbling into a silent failure (e.g. a call that never rings) later.
- */
-const IOS_MIC_PROMPTED_KEY = 'permissions.iosMicrophonePrompted';
+let startupCheckRunning = false;
 
 /**
- * iOS only shows the microphone prompt the first time the mic is opened, which
- * otherwise happens mid-call (after answering from CallKit). Open it briefly
- * once at app start so the prompt appears up front; after the first answer
- * iOS never prompts again, so it is not repeated.
+ * Runs on every app open (and after login): asks for every permission the
+ * system can still prompt for, then shows one summary alert with whatever is
+ * still missing, so the user is reminded each time instead of discovering it
+ * when a call never rings. Skipped while a call is in progress.
  */
-async function promptIosMicrophoneOnce(): Promise<void> {
-  if (Platform.OS !== 'ios') return;
-  try {
-    if (await AsyncStorage.getItem(IOS_MIC_PROMPTED_KEY)) return;
-  } catch {
-    // Storage unavailable: prompting again is harmless.
-  }
-  try {
-    const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
-    stream.getTracks().forEach((track) => track.stop());
-  } catch {
-    // Denied: the call flow offers the settings when it is needed.
-  }
-  try {
-    await AsyncStorage.setItem(IOS_MIC_PROMPTED_KEY, '1');
-  } catch {
-    // Ignore.
-  }
-}
-
 export async function warnAboutMissingPermissions(): Promise<void> {
-  await promptIosMicrophoneOnce();
-  const checks = await checkEssentialPermissions();
-  const missing = checks.filter((c) => !c.granted);
-  if (missing.length === 0) return;
+  startPermissionReminders();
+  if (startupCheckRunning) return;
+  if (AppState.currentState !== 'active') return;
+  if (callStore.getState().phase !== 'idle' && callStore.getState().phase !== 'ended') return;
 
-  const list = missing.map((c) => `• ${c.label}`).join('\n');
-  Alert.alert(
-    'Permisos pendientes',
-    `Para que la app reciba llamadas, avisos de portería y funcione sin interrupciones, activa:\n\n${list}\n\nSin esto la app puede no sonar cuando te llamen.`,
-    [
-      { text: 'Ahora no', style: 'cancel' },
-      {
-        text: 'Abrir ajustes',
-        onPress: () => {
-          if (missing.some((c) => c.key === 'battery') && Platform.OS === 'android') {
-            notifee.openBatteryOptimizationSettings().catch(() => void Linking.openSettings());
-          } else {
-            void Linking.openSettings();
-          }
+  startupCheckRunning = true;
+  try {
+    const checks = await checkEssentialPermissions({ prompt: true });
+    const missing = checks.filter((c) => !c.granted);
+    if (missing.length === 0) return;
+
+    const list = missing.map((c) => `• ${c.label}`).join('\n');
+    Alert.alert(
+      'Permisos pendientes',
+      `Para que la app reciba llamadas, avisos de portería y funcione sin interrupciones, activa:\n\n${list}\n\nSin esto la app puede no sonar cuando te llamen.`,
+      [
+        { text: 'Ahora no', style: 'cancel' },
+        {
+          text: 'Abrir ajustes',
+          onPress: () => {
+            if (missing.some((c) => c.key === 'battery') && Platform.OS === 'android') {
+              notifee.openBatteryOptimizationSettings().catch(() => void Linking.openSettings());
+            } else {
+              void Linking.openSettings();
+            }
+          },
         },
-      },
-    ],
-  );
+      ],
+    );
+  } catch {
+    // Never block the app on a permission check.
+  } finally {
+    startupCheckRunning = false;
+  }
+}
+
+const REMIND_AFTER_BACKGROUND_MS = 60 * 60 * 1000;
+let lastBackgroundAt: number | null = null;
+let foregroundReminderStarted = false;
+
+/**
+ * Also remind when the app comes back to the foreground after being in the
+ * background for a while (an app can stay alive for days without a cold start).
+ */
+export function startPermissionReminders(): void {
+  if (foregroundReminderStarted) return;
+  foregroundReminderStarted = true;
+  AppState.addEventListener('change', (state) => {
+    if (state === 'background') {
+      lastBackgroundAt = Date.now();
+      return;
+    }
+    if (state === 'active' && lastBackgroundAt && Date.now() - lastBackgroundAt >= REMIND_AFTER_BACKGROUND_MS) {
+      lastBackgroundAt = null;
+      setTimeout(() => void warnAboutMissingPermissions(), 800);
+    }
+  });
 }
 
 /**
- * Checks the permission and requests it again if missing. On iOS the system
- * prompts when the feature is used, so this resolves 'granted'.
+ * Checks the permission and requests it again if missing; if the user blocked
+ * it, explains it and offers to open the settings.
  */
 export async function requestPermission(
   permission: AppPermission,
   options: { promptSettingsIfBlocked?: boolean } = {},
 ): Promise<PermissionOutcome> {
   if (Platform.OS !== 'android') {
-    return 'granted';
+    const [item] = nativePermissions(permission);
+    if (!item) return 'granted';
+    try {
+      const status = await request(item);
+      if (isUsable(status)) return 'granted';
+      if (status === RESULTS.BLOCKED) {
+        if (options.promptSettingsIfBlocked ?? true) {
+          showPermissionSettingsAlert(permission);
+        }
+        return 'blocked';
+      }
+      return 'denied';
+    } catch {
+      return 'granted';
+    }
   }
 
   const permissions = androidPermissions(permission);

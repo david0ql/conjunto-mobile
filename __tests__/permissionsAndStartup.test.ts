@@ -127,10 +127,24 @@ describe('requestPermission (asks again when needed)', () => {
     await expect(requestPermission('microphone')).resolves.toBe('denied');
   });
 
-  it('is a no-op on iOS (the system prompts when the feature is used)', async () => {
+  it('on iOS asks through the system dialog and offers settings when blocked', async () => {
     jest.replaceProperty(Platform, 'OS', 'ios');
+    const native = jest.requireMock('react-native-permissions');
+    const requestSpy = jest.spyOn(native, 'request');
+
+    requestSpy.mockResolvedValueOnce(native.RESULTS.GRANTED);
     await expect(requestPermission('camera')).resolves.toBe('granted');
+    expect(requestSpy).toHaveBeenLastCalledWith(native.PERMISSIONS.IOS.CAMERA);
     expect(checkSpy).not.toHaveBeenCalled();
+
+    requestSpy.mockResolvedValueOnce(native.RESULTS.BLOCKED);
+    await expect(requestPermission('microphone')).resolves.toBe('blocked');
+    expect(alertSpy.mock.calls[0][0]).toMatch(/micrófono/i);
+  });
+
+  it('on iOS the phone permission is not needed (CallKit)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    await expect(requestPermission('phone')).resolves.toBe('granted');
   });
 
   it('exposes the settings alert and a typed error for already-informed failures', () => {

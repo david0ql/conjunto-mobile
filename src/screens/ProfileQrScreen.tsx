@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import { launchCamera, launchImageLibrary, type ImagePickerResponse } from 'react-native-image-picker';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { NavigationComponentProps } from 'react-native-navigation';
 import {
@@ -14,11 +15,14 @@ import { COMPONENTS } from '../navigation/componentNames';
 import { authStore } from '../context/auth.store';
 import { callService } from '../realtime/calls/callService';
 import { PairingNebula } from '../components/PairingNebula';
+import { requestPermission, showPermissionSettingsAlert } from '../services/permissions';
 import {
   getMyProfile,
   getMyApartments,
   getMyQr,
   getMyVehicles,
+  resolveImageUrl,
+  updateMyPhoto,
   type ResidentProfile,
   type ResidentApartment,
   type Vehicle,
@@ -41,6 +45,7 @@ export function ProfileQrScreen({ componentId }: NavigationComponentProps) {
   const [mode, setMode] = useState<'signature' | 'qr'>('signature');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   function fetchProfile(isRefresh = false) {
     if (isRefresh) setRefreshing(true);
@@ -66,6 +71,60 @@ export function ProfileQrScreen({ componentId }: NavigationComponentProps) {
       .catch(() => {});
   }, [apartments, selectedAptIdx]);
 
+  async function uploadPicked(result: ImagePickerResponse) {
+    if (result.errorCode === 'permission') {
+      showPermissionSettingsAlert('camera');
+      return;
+    }
+    const asset = result.assets?.[0];
+    if (result.didCancel || !asset?.uri) return;
+
+    setUploadingPhoto(true);
+    try {
+      const updated = await updateMyPhoto({ uri: asset.uri, fileName: asset.fileName, type: asset.type });
+      setProfile((current) => (current ? { ...current, photoPath: updated.photoPath } : updated));
+    } catch {
+      Alert.alert('Error', 'No fue posible actualizar la foto. Intenta de nuevo.');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  async function takePhoto() {
+    const camera = await requestPermission('camera');
+    if (camera === 'denied') {
+      Alert.alert('Permiso denegado', 'Necesitas permitir la cámara para tomar tu foto.');
+      return;
+    }
+    if (camera === 'blocked') return;
+    try {
+      await uploadPicked(
+        await launchCamera({ mediaType: 'photo', cameraType: 'front', quality: 0.7, maxWidth: 1080, maxHeight: 1080, saveToPhotos: false }),
+      );
+    } catch {
+      Alert.alert('Error', 'No fue posible abrir la cámara.');
+    }
+  }
+
+  async function pickFromLibrary() {
+    try {
+      await uploadPicked(
+        await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1, quality: 0.7, maxWidth: 1080, maxHeight: 1080 }),
+      );
+    } catch {
+      Alert.alert('Error', 'No fue posible abrir la galería.');
+    }
+  }
+
+  function handleChangePhoto() {
+    if (uploadingPhoto) return;
+    Alert.alert('Foto de perfil', undefined, [
+      { text: 'Tomar foto', onPress: () => void takePhoto() },
+      { text: 'Elegir de la galería', onPress: () => void pickFromLibrary() },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
+  }
+
   async function handleLogout() {
     await callService.stop();
     await authStore.clearSession();
@@ -87,6 +146,7 @@ export function ProfileQrScreen({ componentId }: NavigationComponentProps) {
   ] as const;
 
   const canManageFamily = authStore.getUser()?.type === 'resident';
+  const photoUri = resolveImageUrl(profile?.photoPath);
 
   return (
     <NoirScreen onRefresh={() => fetchProfile(true)} refreshing={refreshing}>
@@ -94,6 +154,27 @@ export function ProfileQrScreen({ componentId }: NavigationComponentProps) {
 
       <View style={styles.content}>
         <View style={styles.header}>
+          <Pressable
+            accessibilityLabel="Cambiar foto de perfil"
+            disabled={!canManageFamily || loading}
+            onPress={handleChangePhoto}
+            style={styles.avatar}>
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} style={styles.avatarImage} />
+            ) : (
+              <MaterialIcons color={noirTheme.surfaceHighest} name="person" size={56} />
+            )}
+            {uploadingPhoto ? (
+              <View style={styles.avatarOverlay}>
+                <ActivityIndicator color={noirTheme.primary} />
+              </View>
+            ) : null}
+            {canManageFamily ? (
+              <View style={styles.avatarBadge}>
+                <MaterialIcons color="#000000" name="photo-camera" size={14} />
+              </View>
+            ) : null}
+          </Pressable>
           <Eyebrow>Resident ID</Eyebrow>
           {loading ? (
             <View style={styles.nameSkeleton} />
@@ -243,6 +324,36 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     gap: 8,
+  },
+  avatar: {
+    width: 104,
+    height: 104,
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: noirTheme.surfaceLow,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  avatarBadge: {
+    position: 'absolute',
+    right: -6,
+    bottom: -6,
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: noirTheme.primary,
   },
   nameSkeleton: {
     width: 200,

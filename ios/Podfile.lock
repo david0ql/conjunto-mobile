@@ -2087,6 +2087,28 @@ PODS:
     - RNNotifee/NotifeeCore (= 9.1.8)
   - RNNotifee/NotifeeCore (9.1.8):
     - React-Core
+  - RNPermissions (5.6.2):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - RNVectorIcons (10.3.0):
     - hermes-engine
     - RCTRequired
@@ -2199,6 +2221,7 @@ DEPENDENCIES:
   - "RNFBMessaging (from `../node_modules/@react-native-firebase/messaging`)"
   - RNKeychain (from `../node_modules/react-native-keychain`)
   - "RNNotifee (from `../node_modules/@notifee/react-native`)"
+  - RNPermissions (from `../node_modules/react-native-permissions`)
   - RNVectorIcons (from `../node_modules/react-native-vector-icons`)
   - RNVoipPushNotification (from `../node_modules/react-native-voip-push-notification`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
@@ -2388,6 +2411,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-keychain"
   RNNotifee:
     :path: "../node_modules/@notifee/react-native"
+  RNPermissions:
+    :path: "../node_modules/react-native-permissions"
   RNVectorIcons:
     :path: "../node_modules/react-native-vector-icons"
   RNVoipPushNotification:
@@ -2492,10 +2517,11 @@ SPEC CHECKSUMS:
   RNFBMessaging: 74e8a674ac87b7675488f68673a655090be59a6d
   RNKeychain: 667b7bd224f14055ae4cb52b41a82ad0ad70574f
   RNNotifee: 5e3b271e8ea7456a36eec994085543c9adca9168
+  RNPermissions: 4b1e3aceb915c1b6ffbd2a82c9683adb25ac0aa3
   RNVectorIcons: 4351544f100d4f12cac156a7c13399e60bab3e26
   RNVoipPushNotification: 4998fe6724d421da616dca765da7dc421ff54c4e
   Yoga: c0b3f2c7e8d3e327e450223a2414ca3fa296b9a2
 
-PODFILE CHECKSUM: bb92ef7b12b63a5939f46ad1a114e3513ea4a16f
+PODFILE CHECKSUM: e35a7fe1415e25ad0a72c7b68716b9374e03b9f2
 
 COCOAPODS: 1.16.2
