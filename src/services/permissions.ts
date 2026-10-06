@@ -1,5 +1,7 @@
 import { Alert, Linking, PermissionsAndroid, Platform, type Permission } from 'react-native';
 import notifee, { AuthorizationStatus } from '@notifee/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mediaDevices } from 'react-native-webrtc';
 
 /**
  * Asks again for a permission at the moment it is needed (a call, a photo).
@@ -135,7 +137,36 @@ export async function checkEssentialPermissions(): Promise<EssentialPermissionCh
  * once per app open so the user always knows what to fix, instead of
  * stumbling into a silent failure (e.g. a call that never rings) later.
  */
+const IOS_MIC_PROMPTED_KEY = 'permissions.iosMicrophonePrompted';
+
+/**
+ * iOS only shows the microphone prompt the first time the mic is opened, which
+ * otherwise happens mid-call (after answering from CallKit). Open it briefly
+ * once at app start so the prompt appears up front; after the first answer
+ * iOS never prompts again, so it is not repeated.
+ */
+async function promptIosMicrophoneOnce(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+  try {
+    if (await AsyncStorage.getItem(IOS_MIC_PROMPTED_KEY)) return;
+  } catch {
+    // Storage unavailable: prompting again is harmless.
+  }
+  try {
+    const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+    stream.getTracks().forEach((track) => track.stop());
+  } catch {
+    // Denied: the call flow offers the settings when it is needed.
+  }
+  try {
+    await AsyncStorage.setItem(IOS_MIC_PROMPTED_KEY, '1');
+  } catch {
+    // Ignore.
+  }
+}
+
 export async function warnAboutMissingPermissions(): Promise<void> {
+  await promptIosMicrophoneOnce();
   const checks = await checkEssentialPermissions();
   const missing = checks.filter((c) => !c.granted);
   if (missing.length === 0) return;
